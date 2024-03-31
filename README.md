@@ -13,7 +13,7 @@ In order not to manually create directories and then clone the repository, I cre
 you to do this with one command.
 
 ```sh
-GIT_PROJECT_DIR="~/src" clone https://github.com/juev/gclone.git 
+GIT_PROJECT_DIR="~/src" gclone https://github.com/juev/gclone.git 
 ```
 
 ## Install
