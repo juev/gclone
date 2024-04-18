@@ -18,3 +18,7 @@ jobs:
         name: Build
         run: go build .
         shell: bash
+      - 
+        name: Tests
+        run: go test ./...
+        shell: bash
