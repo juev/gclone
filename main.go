@@ -1,12 +1,18 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+)
+
+const (
+	httpPrefix = `https://`
+	gitPrefix  = `git@`
 )
 
 func main() {
@@ -20,10 +26,16 @@ func main() {
 	}
 
 	repository := os.Args[1]
+	if !strings.HasPrefix(repository, httpPrefix) &&
+		!strings.HasPrefix(repository, gitPrefix) {
+		repository = "https://" + repository
+	}
+
 	projectDir := getProjectDir(repository)
 
 	if ok := isNotEmpty(projectDir); ok {
-		fatal("directory exist and not empty")
+		fmt.Println(projectDir)
+		return
 	}
 
 	if err := os.MkdirAll(filepath.Dir(projectDir), 0750); err != nil {
@@ -42,16 +54,6 @@ func main() {
 // parseRepositoryURL get directory from repository URL
 // URL can be http and ssh
 func parseRepositoryURL(repository string) (dir string) {
-	const (
-		httpPrefix = `https://`
-		gitPrefix  = `git@`
-	)
-
-	if !strings.HasPrefix(repository, httpPrefix) &&
-		!strings.HasPrefix(repository, gitPrefix) {
-		usage()
-	}
-
 	dir = strings.TrimPrefix(repository, httpPrefix)
 	dir = strings.TrimPrefix(dir, gitPrefix)
 	dir = strings.TrimSuffix(dir, ".git")
@@ -95,7 +97,7 @@ func isNotEmpty(name string) bool {
 
 	_, err = f.Readdirnames(1)
 
-	return err != io.EOF
+	return !errors.Is(err, io.EOF)
 }
 
 // fatal print to Stderr message and exit from program

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func Test_parseRepository(t *testing.T) {
+func Test_parseRepositoryURL(t *testing.T) {
 	type args struct {
 		repository string
 	}
@@ -18,6 +18,13 @@ func Test_parseRepository(t *testing.T) {
 			name: "http github",
 			args: args{
 				repository: "https://github.com/kevincobain2000/gobrew.git",
+			},
+			wantDir: "github.com/kevincobain2000/gobrew",
+		},
+		{
+			name: "http github without prefix",
+			args: args{
+				repository: "github.com/kevincobain2000/gobrew.git",
 			},
 			wantDir: "github.com/kevincobain2000/gobrew",
 		},
