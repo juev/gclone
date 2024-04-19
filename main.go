@@ -15,7 +15,11 @@ const (
 	gitPrefix  = `git@`
 )
 
-var version = "dev"
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -25,7 +29,7 @@ func main() {
 	var repository string
 	switch os.Args[1] {
 	case "-v", "--version", "version":
-		fmt.Println(version)
+		fmt.Printf("gclone version %s, commit %s, built at %s\n", version, commit, date)
 		return
 	default:
 		repository = os.Args[1]
