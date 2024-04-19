@@ -15,9 +15,20 @@ const (
 	gitPrefix  = `git@`
 )
 
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
+	}
+
+	var repository string
+	switch os.Args[1] {
+	case "-v", "--version", "version":
+		fmt.Println(version)
+		return
+	default:
+		repository = os.Args[1]
 	}
 
 	_, err := exec.LookPath("git")
@@ -25,7 +36,6 @@ func main() {
 		fatal("git not found")
 	}
 
-	repository := os.Args[1]
 	if !strings.HasPrefix(repository, httpPrefix) &&
 		!strings.HasPrefix(repository, gitPrefix) {
 		repository = "https://" + repository
