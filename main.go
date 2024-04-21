@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	version = "dev"
+	version = "0.2.0"
 	commit  = "none"
 	date    = "unknown"
 )
@@ -28,6 +28,10 @@ func main() {
 		return
 	default:
 		repository = os.Args[1]
+	}
+
+	if repository == stripPrefixes(repository) {
+		repository = "https://" + repository
 	}
 
 	_, err := exec.LookPath("git")
