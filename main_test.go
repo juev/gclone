@@ -169,3 +169,57 @@ func Test_isNotEmpty(t *testing.T) {
 		})
 	}
 }
+
+func Test_stripPrefixes(t *testing.T) {
+	type args struct {
+		repository string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "https",
+			args: args{
+				repository: "https://github.com/user/repo",
+			},
+			want: "github.com/user/repo",
+		},
+		{
+			name: "git",
+			args: args{
+				repository: "git@git.sr.ht:~libreboot/lbmk",
+			},
+			want: "git.sr.ht:~libreboot/lbmk",
+		},
+		{
+			name: "ssh",
+			args: args{
+				repository: "ssh://git.sr.ht/~libreboot/lbmk",
+			},
+			want: "git.sr.ht/~libreboot/lbmk",
+		},
+		{
+			name: "git",
+			args: args{
+				repository: "git://git@git.sr.ht:~libreboot/lbmk.git",
+			},
+			want: "git@git.sr.ht:~libreboot/lbmk.git",
+		},
+		{
+			name: "ftp",
+			args: args{
+				repository: "ftp://git.sr.ht/~libreboot/lbmk.git",
+			},
+			want: "git.sr.ht/~libreboot/lbmk.git",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripPrefixes(tt.args.repository); got != tt.want {
+				t.Errorf("stripPrefixes() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

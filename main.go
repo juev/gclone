@@ -10,11 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	httpPrefix = `https://`
-	gitPrefix  = `git@`
-)
-
 var (
 	version = "dev"
 	commit  = "none"
@@ -40,11 +35,6 @@ func main() {
 		fatal("git not found")
 	}
 
-	if !strings.HasPrefix(repository, httpPrefix) &&
-		!strings.HasPrefix(repository, gitPrefix) {
-		repository = "https://" + repository
-	}
-
 	projectDir := getProjectDir(repository)
 
 	if ok := isNotEmpty(projectDir); ok {
@@ -68,8 +58,7 @@ func main() {
 // parseRepositoryURL get directory from repository URL
 // URL can be http and ssh
 func parseRepositoryURL(repository string) (dir string) {
-	dir = strings.TrimPrefix(repository, httpPrefix)
-	dir = strings.TrimPrefix(dir, gitPrefix)
+	dir = stripPrefixes(repository)
 	dir = strings.TrimSuffix(dir, ".git")
 	dir = strings.ReplaceAll(dir, "~", "")
 	dir = strings.Replace(dir, ":", string(os.PathSeparator), 1)
@@ -79,6 +68,16 @@ func parseRepositoryURL(repository string) (dir string) {
 	}
 
 	return dir
+}
+
+func stripPrefixes(repository string) string {
+	prefixes := []string{"git@", "https://", "http://", "ssh://", "git://", "ftp://", "ftps://"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(repository, prefix) {
+			return strings.TrimPrefix(repository, prefix)
+		}
+	}
+	return repository
 }
 
 // getProjectDir return directory from GIT_PROJECT_DIR variable and
