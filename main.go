@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -19,23 +21,26 @@ var (
 func main() {
 	if len(os.Args) < 2 {
 		usage()
+		return
 	}
 
 	var repository string
 	switch os.Args[1] {
+	case "-h", "--help", "help":
+		usage()
+		return
 	case "-v", "--version", "version":
-		fmt.Printf("gclone version %s, commit %s, built at %s\n", version, commit, date)
+		if commit != "none" {
+			fmt.Printf("gclone version %s, commit %s, built at %s\n", version, commit, date)
+		} else {
+			fmt.Printf("gclone version %s\n", version)
+		}
 		return
 	default:
 		repository = os.Args[1]
 	}
 
-	if repository == stripPrefixes(repository) {
-		repository = "https://" + repository
-	}
-
-	_, err := exec.LookPath("git")
-	if err != nil {
+	if _, err := exec.LookPath("git"); err != nil {
 		fatal("git not found")
 	}
 
@@ -59,29 +64,22 @@ func main() {
 	fmt.Println(projectDir)
 }
 
-// parseRepositoryURL get directory from repository URL
-// URL can be http and ssh
-func parseRepositoryURL(repository string) (dir string) {
-	dir = stripPrefixes(repository)
-	dir = strings.TrimSuffix(dir, ".git")
-	dir = strings.ReplaceAll(dir, "~", "")
-	dir = strings.Replace(dir, ":", string(os.PathSeparator), 1)
-
-	if dir == "" {
-		usage()
+// parse parses the given repository string and returns the parsed repository URL.
+//
+// It takes a string parameter named repository, which represents the repository to be parsed.
+// The function returns a string that represents the parsed repository URL.
+func parse(repository string) string {
+	r := regexp.MustCompile(`^[^@\:\/]+@([^:]+):(.+)`)
+	if r.MatchString(repository) {
+		repository = "git://" + strings.ReplaceAll(repository, ":", "/")
 	}
 
-	return dir
-}
-
-func stripPrefixes(repository string) string {
-	prefixes := []string{"git@", "https://", "http://", "ssh://", "git://", "ftp://", "ftps://"}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(repository, prefix) {
-			return strings.TrimPrefix(repository, prefix)
-		}
+	repositoryURL, err := url.Parse(repository)
+	if err != nil {
+		fatal("failed parse repository: %w", err)
 	}
-	return repository
+
+	return repositoryURL.Hostname() + strings.TrimSuffix(strings.TrimSuffix(repositoryURL.Path, ".git"), "/")
 }
 
 // getProjectDir return directory from GIT_PROJECT_DIR variable and
@@ -99,8 +97,8 @@ func getProjectDir(repository string) string {
 	}
 
 	return filepath.Join(
-		filepath.Clean(gitProjectDir),
-		filepath.Clean(parseRepositoryURL(repository)),
+		gitProjectDir,
+		parse(repository),
 	)
 }
 
@@ -120,20 +118,23 @@ func isNotEmpty(name string) bool {
 // fatal print to Stderr message and exit from program
 func fatal(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", a...)
-	os.Exit(0)
+	os.Exit(1)
 }
 
-// usage print program usage
+// Usage prints the usage of the program.
 func usage() {
-	fmt.Printf(
-		`example: 
-GIT_PROJECT_DIR="~/src" gclone https://github.com/juev/gclone.git
-
-the repository must be in one of the following formats:
-
-- https://github.com/repository/name
-- git@github.com/repository/name
-`,
-	)
-	os.Exit(0)
+	fmt.Println("usage: gclone [-h] [-v] [REPOSITORY]")
+	fmt.Println()
+	fmt.Println("positional arguments:")
+	fmt.Println("  REPOSITORY       Repository URL")
+	fmt.Println()
+	fmt.Println("optional arguments:")
+	fmt.Println("  -h, --help       Show this help message and exit")
+	fmt.Println("  -v, --version    Show the version number and exit")
+	fmt.Println()
+	fmt.Println("environment variables:")
+	fmt.Println("  GIT_PROJECT_DIR  Directory to clone repositories")
+	fmt.Println()
+	fmt.Println("example:")
+	fmt.Println("  GIT_PROJECT_DIR=\"$HOME/src\" gclone https://github.com/user/repo")
 }

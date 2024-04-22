@@ -5,67 +5,6 @@ import (
 	"testing"
 )
 
-func Test_parseRepositoryURL(t *testing.T) {
-	type args struct {
-		repository string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantDir string
-	}{
-		{
-			name: "http github",
-			args: args{
-				repository: "https://github.com/kevincobain2000/gobrew.git",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "http github without prefix",
-			args: args{
-				repository: "github.com/kevincobain2000/gobrew.git",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "http github without prefix",
-			args: args{
-				repository: "https://github.com/kevincobain2000/gobrew",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "git github",
-			args: args{
-				repository: "git@github.com:kevincobain2000/gobrew.git",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "http sr.ht",
-			args: args{
-				repository: "https://git.sr.ht/~libreboot/lbmk",
-			},
-			wantDir: "git.sr.ht/libreboot/lbmk",
-		},
-		{
-			name: "git sr.ht",
-			args: args{
-				repository: "git@git.sr.ht:~libreboot/lbmk",
-			},
-			wantDir: "git.sr.ht/libreboot/lbmk",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if gotDir := parseRepositoryURL(tt.args.repository); gotDir != tt.wantDir {
-				t.Errorf("parseRepository() = %v, want %v", gotDir, tt.wantDir)
-			}
-		})
-	}
-}
-
 func Test_getProjectDir(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -115,6 +54,13 @@ func Test_getProjectDir(t *testing.T) {
 			homeVar:       "/home/test",
 			gitProjectDir: "",
 			want:          "github.com/user/repo",
+		},
+		{
+			name:          "src",
+			repository:    "ssh://user@host.xz:443/~user/path/to/repo.git/",
+			homeVar:       "/home/test",
+			gitProjectDir: "src",
+			want:          "src/host.xz/~user/path/to/repo.git",
 		},
 	}
 	for _, tt := range tests {
@@ -170,55 +116,49 @@ func Test_isNotEmpty(t *testing.T) {
 	}
 }
 
-func Test_stripPrefixes(t *testing.T) {
+func Test_parse(t *testing.T) {
 	type args struct {
 		repository string
 	}
 	tests := []struct {
-		name string
-		args args
-		want string
+		name     string
+		args     args
+		wantRepo string
 	}{
 		{
 			name: "https",
 			args: args{
 				repository: "https://github.com/user/repo",
 			},
-			want: "github.com/user/repo",
+			wantRepo: "github.com/user/repo",
+		},
+		{
+			name: "without scheme",
+			args: args{
+				repository: "github.com/user/repo",
+			},
+			wantRepo: "github.com/user/repo",
+		},
+		{
+			name: "ssh",
+			args: args{
+				repository: "ssh://user@host.xz:443/~user/path/to/repo.git/",
+			},
+			wantRepo: "host.xz/~user/path/to/repo.git",
 		},
 		{
 			name: "git",
 			args: args{
 				repository: "git@git.sr.ht:~libreboot/lbmk",
 			},
-			want: "git.sr.ht:~libreboot/lbmk",
-		},
-		{
-			name: "ssh",
-			args: args{
-				repository: "ssh://git.sr.ht/~libreboot/lbmk",
-			},
-			want: "git.sr.ht/~libreboot/lbmk",
-		},
-		{
-			name: "git",
-			args: args{
-				repository: "git://git@git.sr.ht:~libreboot/lbmk.git",
-			},
-			want: "git@git.sr.ht:~libreboot/lbmk.git",
-		},
-		{
-			name: "ftp",
-			args: args{
-				repository: "ftp://git.sr.ht/~libreboot/lbmk.git",
-			},
-			want: "git.sr.ht/~libreboot/lbmk.git",
+			wantRepo: "git.sr.ht/~libreboot/lbmk",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := stripPrefixes(tt.args.repository); got != tt.want {
-				t.Errorf("stripPrefixes() = %v, want %v", got, tt.want)
+			gotRepo := parse(tt.args.repository)
+			if gotRepo != tt.wantRepo {
+				t.Errorf("parse() gotRepo = %v, want %v", gotRepo, tt.wantRepo)
 			}
 		})
 	}
