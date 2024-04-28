@@ -116,7 +116,7 @@ func Test_isNotEmpty(t *testing.T) {
 	}
 }
 
-func Test_parse(t *testing.T) {
+func Test_normalize(t *testing.T) {
 	type args struct {
 		repository string
 	}
@@ -156,7 +156,7 @@ func Test_parse(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotRepo := parse(tt.args.repository)
+			gotRepo := normalize(tt.args.repository)
 			if gotRepo != tt.wantRepo {
 				t.Errorf("parse() gotRepo = %v, want %v", gotRepo, tt.wantRepo)
 			}

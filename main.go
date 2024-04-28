@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,22 +63,14 @@ func main() {
 	fmt.Println(projectDir)
 }
 
-// parse parses the given repository string and returns the parsed repository URL.
-//
-// It takes a string parameter named repository, which represents the repository to be parsed.
-// The function returns a string that represents the parsed repository URL.
-func parse(repository string) string {
-	r := regexp.MustCompile(`^[^@\:\/]+@([^:]+):(.+)`)
-	if r.MatchString(repository) {
-		repository = "git://" + strings.ReplaceAll(repository, ":", "/")
+// normalize normalizes the given repository string and returns the parsed repository URL.
+func normalize(repo string) string {
+	r := regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?(?:/|:)?(.*)$`)
+	match := r.FindStringSubmatch(repo)
+	if len(match) == 3 {
+		return match[1] + "/" + strings.TrimSuffix(strings.TrimSuffix(match[2], ".git"), "/")
 	}
-
-	repositoryURL, err := url.Parse(repository)
-	if err != nil {
-		fatal("failed parse repository: %w", err)
-	}
-
-	return repositoryURL.Hostname() + strings.TrimSuffix(strings.TrimSuffix(repositoryURL.Path, ".git"), "/")
+	return ""
 }
 
 // getProjectDir return directory from GIT_PROJECT_DIR variable and
@@ -98,7 +89,7 @@ func getProjectDir(repository string) string {
 
 	return filepath.Join(
 		gitProjectDir,
-		parse(repository),
+		normalize(repository),
 	)
 }
 
