@@ -5,67 +5,6 @@ import (
 	"testing"
 )
 
-func Test_parseRepositoryURL(t *testing.T) {
-	type args struct {
-		repository string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantDir string
-	}{
-		{
-			name: "http github",
-			args: args{
-				repository: "https://github.com/kevincobain2000/gobrew.git",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "http github without prefix",
-			args: args{
-				repository: "github.com/kevincobain2000/gobrew.git",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "http github without prefix",
-			args: args{
-				repository: "https://github.com/kevincobain2000/gobrew",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "git github",
-			args: args{
-				repository: "git@github.com:kevincobain2000/gobrew.git",
-			},
-			wantDir: "github.com/kevincobain2000/gobrew",
-		},
-		{
-			name: "http sr.ht",
-			args: args{
-				repository: "https://git.sr.ht/~libreboot/lbmk",
-			},
-			wantDir: "git.sr.ht/libreboot/lbmk",
-		},
-		{
-			name: "git sr.ht",
-			args: args{
-				repository: "git@git.sr.ht:~libreboot/lbmk",
-			},
-			wantDir: "git.sr.ht/libreboot/lbmk",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if gotDir := parseRepositoryURL(tt.args.repository); gotDir != tt.wantDir {
-				t.Errorf("parseRepository() = %v, want %v", gotDir, tt.wantDir)
-			}
-		})
-	}
-}
-
 func Test_getProjectDir(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -116,6 +55,13 @@ func Test_getProjectDir(t *testing.T) {
 			gitProjectDir: "",
 			want:          "github.com/user/repo",
 		},
+		{
+			name:          "src",
+			repository:    "ssh://user@host.xz:443/~user/path/to/repo.git/",
+			homeVar:       "/home/test",
+			gitProjectDir: "src",
+			want:          "src/host.xz/user/path/to/repo",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,6 +111,54 @@ func Test_isNotEmpty(t *testing.T) {
 			got := isNotEmpty(filepath.Join("testdata", tt.args.name))
 			if got != tt.want {
 				t.Errorf("isEmpty() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_normalize(t *testing.T) {
+	type args struct {
+		repository string
+	}
+	tests := []struct {
+		name     string
+		args     args
+		wantRepo string
+	}{
+		{
+			name: "https",
+			args: args{
+				repository: "https://github.com/user/repo",
+			},
+			wantRepo: "github.com/user/repo",
+		},
+		{
+			name: "without scheme",
+			args: args{
+				repository: "github.com/user/repo",
+			},
+			wantRepo: "github.com/user/repo",
+		},
+		{
+			name: "ssh",
+			args: args{
+				repository: "ssh://user@host.xz:443/~user/path/to/repo.git/",
+			},
+			wantRepo: "host.xz/user/path/to/repo",
+		},
+		{
+			name: "git",
+			args: args{
+				repository: "git@git.sr.ht:~libreboot/lbmk",
+			},
+			wantRepo: "git.sr.ht/libreboot/lbmk",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRepo := normalize(tt.args.repository)
+			if gotRepo != tt.wantRepo {
+				t.Errorf("parse() gotRepo = %v, want %v", gotRepo, tt.wantRepo)
 			}
 		})
 	}
