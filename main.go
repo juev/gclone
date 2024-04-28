@@ -67,10 +67,14 @@ func main() {
 func normalize(repo string) string {
 	r := regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?(?:/|:)?(.*)$`)
 	match := r.FindStringSubmatch(repo)
-	if len(match) == 3 {
-		return match[1] + "/" + strings.TrimSuffix(strings.TrimSuffix(match[2], ".git"), "/")
+	if len(match) != 3 {
+		return ""
 	}
-	return ""
+	path := match[2]
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimPrefix(path, "~")
+	return filepath.Join(match[1], path)
 }
 
 // getProjectDir return directory from GIT_PROJECT_DIR variable and

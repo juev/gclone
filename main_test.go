@@ -60,7 +60,7 @@ func Test_getProjectDir(t *testing.T) {
 			repository:    "ssh://user@host.xz:443/~user/path/to/repo.git/",
 			homeVar:       "/home/test",
 			gitProjectDir: "src",
-			want:          "src/host.xz/~user/path/to/repo.git",
+			want:          "src/host.xz/user/path/to/repo",
 		},
 	}
 	for _, tt := range tests {
@@ -144,14 +144,14 @@ func Test_normalize(t *testing.T) {
 			args: args{
 				repository: "ssh://user@host.xz:443/~user/path/to/repo.git/",
 			},
-			wantRepo: "host.xz/~user/path/to/repo.git",
+			wantRepo: "host.xz/user/path/to/repo",
 		},
 		{
 			name: "git",
 			args: args{
 				repository: "git@git.sr.ht:~libreboot/lbmk",
 			},
-			wantRepo: "git.sr.ht/~libreboot/lbmk",
+			wantRepo: "git.sr.ht/libreboot/lbmk",
 		},
 	}
 	for _, tt := range tests {
