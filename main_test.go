@@ -69,13 +69,13 @@ func Test_getProjectDir(t *testing.T) {
 			t.Setenv("GIT_PROJECT_DIR", tt.gitProjectDir)
 
 			if got := getProjectDir(tt.repository); got != tt.want {
-				t.Errorf("parseEnvs() = %v, want %v", got, tt.want)
+				t.Errorf("getProjectDir() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func Test_isNotEmpty(t *testing.T) {
+func Test_isDirectoryNotEmpty(t *testing.T) {
 	type args struct {
 		name string
 	}
@@ -108,9 +108,9 @@ func Test_isNotEmpty(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isNotEmpty(filepath.Join("testdata", tt.args.name))
+			got := isDirectoryNotEmpty(filepath.Join("testdata", tt.args.name))
 			if got != tt.want {
-				t.Errorf("isEmpty() = %v, want %v", got, tt.want)
+				t.Errorf("isDirectoryNotEmpty() = %v, want %v", got, tt.want)
 			}
 		})
 	}
