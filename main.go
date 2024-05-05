@@ -82,22 +82,20 @@ func normalize(repo string) string {
 // The project directory path is returned as a string.
 func getProjectDir(repository string) string {
 	gitProjectDir := os.Getenv("GIT_PROJECT_DIR")
-
 	if strings.HasPrefix(gitProjectDir, "~") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			log.Fatalf("%s", err)
+			log.Fatal(err)
 		}
-		gitProjectDir = strings.TrimPrefix(gitProjectDir, "~")
-		gitProjectDir = filepath.Join(homeDir, gitProjectDir)
+		gitProjectDir = filepath.Join(homeDir, gitProjectDir[1:])
 	}
 
 	return filepath.Join(gitProjectDir, normalize(repository))
 }
 
 // isDirectoryNotEmpty checks if the specified directory is not empty.
-// It opens the directory and reads its contents. If there are any files or directories present,
-// it returns true. Otherwise, it returns false.
+// It uses the Readdirnames function to get the directory contents without loading full FileInfo
+// structures for each entry. If there are any entries, it returns true. Otherwise, it returns false.
 func isDirectoryNotEmpty(name string) bool {
 	f, err := os.Open(name)
 	if err != nil {
@@ -105,9 +103,8 @@ func isDirectoryNotEmpty(name string) bool {
 	}
 	defer f.Close()
 
-	files, _ := os.ReadDir(name)
-
-	return len(files) != 0
+	_, err = f.Readdirnames(1)
+	return err == nil
 }
 
 // Usage prints the usage of the program.
