@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	version = "0.3.0"
+	version = "0.3.1"
 	commit  = "none"
 	date    = "unknown"
 )
@@ -68,7 +68,12 @@ func normalize(repo string) string {
 	if len(match) != 3 {
 		return ""
 	}
-	path := strings.Trim(match[2], "/.git~")
+	path := match[2]
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimPrefix(path, "~")
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
 
 	return filepath.Join(match[1], path)
 }
