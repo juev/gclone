@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/go-git/go-git/v5"
 )
 
 var (
-	version = "0.2.1"
+	version = "0.3.0"
 	commit  = "none"
 	date    = "unknown"
 )
@@ -40,10 +41,6 @@ func main() {
 		repository = os.Args[1]
 	}
 
-	if _, err := exec.LookPath("git"); err != nil {
-		log.Fatalf("git not found")
-	}
-
 	projectDir := getProjectDir(repository)
 
 	if ok := isDirectoryNotEmpty(projectDir); ok {
@@ -55,10 +52,11 @@ func main() {
 		log.Fatalf("failed create directory: %s", err)
 	}
 
-	cmd := exec.Command("git", "clone", repository)
-	cmd.Dir = filepath.Dir(projectDir)
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("failed clone repository: %s", err)
+	if _, err := git.PlainClone(projectDir, false, &git.CloneOptions{
+		URL:      repository,
+		Progress: nil,
+	}); err != nil {
+		log.Fatalf("cannot clone git repository: %s", err)
 	}
 
 	fmt.Println(projectDir)
