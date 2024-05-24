@@ -40,4 +40,28 @@ We can use the output in a command like:
 cd $(gclone $1)
 ```
 
+### Fish shell
+
+Personally I use these functions:
+
+```fish
+function gcd --argument repo
+    if test "$argv[1]" = ""
+        echo "argument is empty"
+        return
+    end
+    cd $(gclone $argv[1])
+end
+```
+
+```fish
+function gcode --argument repo
+    if test "$argv[1]" = ""
+        echo "argument is empty"
+        return
+    end
+    code $(gclone $argv[1])
+end
+```
+
 Enjoy!
