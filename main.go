@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/spf13/pflag"
 )
 
 var (
-	version = "0.3.2"
+	version = "0.3.3"
 	commit  = "none"
 	date    = "unknown"
 )
@@ -19,29 +21,33 @@ var (
 var r = regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?(?:/|:)?(.*)$`)
 
 func main() {
-	if len(os.Args) < 2 {
+	var showCommandHelp, showVersionInfo, quiet bool
+	pflag.BoolVarP(&showCommandHelp, "help", "h", false, "Show this help message and exit")
+	pflag.BoolVarP(&showVersionInfo, "version", "v", false, "Show the version number and exit")
+	pflag.BoolVarP(&quiet, "quiet", "q", false, "Suppress output")
+	pflag.Parse()
+
+	if showCommandHelp {
 		usage()
 		return
 	}
 
-	var repository string
-	switch os.Args[1] {
-	case "-h", "--help", "help":
-		usage()
-		return
-	case "-v", "--version", "version":
+	if showVersionInfo {
 		if commit != "none" {
 			fmt.Printf("gclone version %s, commit %s, built at %s\n", version, commit, date)
 		} else {
 			fmt.Printf("gclone version %s\n", version)
 		}
 		return
-	default:
-		repository = os.Args[1]
 	}
 
 	if _, err := exec.LookPath("git"); err != nil {
 		log.Fatalf("git not found")
+	}
+
+	var repository string
+	if args := pflag.Args(); len(args) > 0 {
+		repository = args[0]
 	}
 
 	projectDir := getProjectDir(repository)
@@ -56,6 +62,10 @@ func main() {
 	}
 
 	cmd := exec.Command("git", "clone", repository)
+	if !quiet {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	cmd.Dir = filepath.Dir(projectDir)
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("failed clone repository: %s", err)
