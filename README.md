@@ -50,7 +50,7 @@ function gcd --argument repo
         echo "argument is empty"
         return
     end
-    cd $(gclone $argv[1])
+    cd $(gclone -q $argv[1])
 end
 ```
 
@@ -60,7 +60,7 @@ function gcode --argument repo
         echo "argument is empty"
         return
     end
-    code $(gclone $argv[1])
+    code $(gclone -q $argv[1])
 end
 ```
 
