@@ -42,35 +42,40 @@ func main() {
 	}
 
 	if _, err := exec.LookPath("git"); err != nil {
-		log.Fatalf("git not found")
+		prnt("git not found")
+		os.Exit(1)
 	}
 
-	var repository string
-	if args := pflag.Args(); len(args) > 0 {
-		repository = args[0]
+	var projectDir string
+	for _, arg := range pflag.Args() {
+		repository := arg
+		projectDir = getProjectDir(repository)
+
+		if ok := isDirectoryNotEmpty(projectDir); ok {
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(projectDir), 0750); err != nil {
+			prnt("failed create directory: %s", err)
+			continue
+		}
+
+		cmd := exec.Command("git", "clone", repository)
+		if !quiet {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+		cmd.Dir = filepath.Dir(projectDir)
+		if err := cmd.Run(); err != nil {
+			prnt("failed clone repository: %s", err)
+			continue
+		}
+		if !quiet {
+			fmt.Println()
+		}
 	}
 
-	projectDir := getProjectDir(repository)
-
-	if ok := isDirectoryNotEmpty(projectDir); ok {
-		fmt.Println(projectDir)
-		return
-	}
-
-	if err := os.MkdirAll(filepath.Dir(projectDir), 0750); err != nil {
-		log.Fatalf("failed create directory: %s", err)
-	}
-
-	cmd := exec.Command("git", "clone", repository)
-	if !quiet {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-	cmd.Dir = filepath.Dir(projectDir)
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("failed clone repository: %s", err)
-	}
-
+	// Print latest project directory
 	fmt.Println(projectDir)
 }
 
@@ -138,4 +143,9 @@ func usage() {
 	fmt.Println()
 	fmt.Println("example:")
 	fmt.Println("  GIT_PROJECT_DIR=\"$HOME/src\" gclone https://github.com/user/repo")
+}
+
+func prnt(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+	fmt.Fprintln(os.Stderr)
 }
