@@ -62,7 +62,7 @@ func main() {
 
 		cmd := exec.Command("git", "clone", repository)
 		if !quiet {
-			cmd.Stdout = os.Stdout
+			cmd.Stdout = os.Stderr
 			cmd.Stderr = os.Stderr
 		}
 		cmd.Dir = filepath.Dir(projectDir)
@@ -71,12 +71,13 @@ func main() {
 			continue
 		}
 		if !quiet {
-			fmt.Println()
+			fmt.Fprintln(os.Stderr)
 		}
 	}
 
 	// Print latest project directory
-	fmt.Println(projectDir)
+	abs, _ := filepath.Abs(projectDir)
+	fmt.Println(abs)
 }
 
 // normalize normalizes the given repository string and returns the parsed repository URL.
