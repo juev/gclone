@@ -18,7 +18,7 @@ var (
 	date    = "unknown"
 )
 
-var r = regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?(?:/|:)?(.*)$`)
+var r = regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?[/:]?(.*)$`)
 
 func main() {
 	var showCommandHelp, showVersionInfo, quiet bool
