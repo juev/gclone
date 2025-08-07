@@ -108,7 +108,7 @@ func (cr *DefaultCommandRunner) RunWithOutput(ctx context.Context, name string, 
 // DefaultGitCloner provides real git cloning functionality
 type DefaultGitCloner struct{}
 
-func (gc *DefaultGitCloner) Clone(ctx context.Context, repository, targetDir string, quiet bool) error {
+func (gc *DefaultGitCloner) Clone(_ context.Context, repository, targetDir string, quiet bool) error {
 	return secureGitClone(repository, targetDir, quiet)
 }
 

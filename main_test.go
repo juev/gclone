@@ -209,7 +209,7 @@ func BenchmarkIsDirectoryNotEmpty(b *testing.B) {
 	if err := os.Mkdir(nonEmptyDir, 0755); err != nil {
 		b.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(nonEmptyDir, "test.txt"), []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(nonEmptyDir, "test.txt"), []byte("test"), 0600); err != nil {
 		b.Fatal(err)
 	}
 
@@ -232,7 +232,7 @@ func BenchmarkIsDirectoryNotEmptyRaw(b *testing.B) {
 	if err := os.Mkdir(nonEmptyDir, 0755); err != nil {
 		b.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(nonEmptyDir, "test.txt"), []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(nonEmptyDir, "test.txt"), []byte("test"), 0600); err != nil {
 		b.Fatal(err)
 	}
 
@@ -256,7 +256,7 @@ func BenchmarkIsDirectoryNotEmptyCache(b *testing.B) {
 	if err := os.Mkdir(nonEmptyDir, 0755); err != nil {
 		b.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(nonEmptyDir, "test.txt"), []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(nonEmptyDir, "test.txt"), []byte("test"), 0600); err != nil {
 		b.Fatal(err)
 	}
 
@@ -430,10 +430,8 @@ func TestValidateRepositoryURL(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("validateRepositoryURL() error = %v, expected to contain %v", err, tt.errMsg)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("validateRepositoryURL() unexpected error = %v for URL: %s", err, tt.url)
-				}
+			} else if err != nil {
+				t.Errorf("validateRepositoryURL() unexpected error = %v for URL: %s", err, tt.url)
 			}
 		})
 	}
@@ -539,10 +537,8 @@ func TestSecureGitCloneTimeout(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.errorMsg) {
 					t.Errorf("secureGitClone() error = %v, expected to contain %v", err, tt.errorMsg)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("secureGitClone() unexpected error = %v for repository: %s", err, tt.repository)
-				}
+			} else if err != nil {
+				t.Errorf("secureGitClone() unexpected error = %v for repository: %s", err, tt.repository)
 			}
 		})
 	}
@@ -735,7 +731,7 @@ type MockGitCloner struct {
 	mutex      sync.Mutex
 }
 
-func (m *MockGitCloner) Clone(ctx context.Context, repository, targetDir string, quiet bool) error {
+func (m *MockGitCloner) Clone(_ context.Context, _, _ string, _ bool) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.CallCount++
@@ -765,15 +761,15 @@ type MockFileSystem struct {
 	ShouldFailMkdir bool
 }
 
-func (m *MockFileSystem) Open(name string) (*os.File, error) {
+func (m *MockFileSystem) Open(_ string) (*os.File, error) {
 	return nil, errors.New("mock open not implemented")
 }
 
-func (m *MockFileSystem) Stat(name string) (os.FileInfo, error) {
+func (m *MockFileSystem) Stat(_ string) (os.FileInfo, error) {
 	return nil, errors.New("mock stat not implemented")
 }
 
-func (m *MockFileSystem) MkdirAll(path string, perm os.FileMode) error {
+func (m *MockFileSystem) MkdirAll(_ string, _ os.FileMode) error {
 	if m.ShouldFailMkdir {
 		return errors.New("mock mkdir failed")
 	}
@@ -900,7 +896,8 @@ func TestWorkerPoolSequentialFallback(t *testing.T) {
 
 // Benchmarks for comparing sequential vs parallel performance
 
-func BenchmarkSequentialProcessing(b *testing.B) {
+// setupBenchmarkConfig creates a common configuration for benchmarks
+func setupBenchmarkConfig(workers int) (*Config, *MockGitCloner) {
 	mockGitCloner := &MockGitCloner{ShouldFail: false}
 	mockDirChecker := &MockDirectoryChecker{ExistingDirs: make(map[string]bool)}
 	mockFS := &MockFileSystem{ShouldFailMkdir: false}
@@ -908,12 +905,12 @@ func BenchmarkSequentialProcessing(b *testing.B) {
 
 	// Create test URLs
 	testRepos := make([]string, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		testRepos[i] = fmt.Sprintf("https://github.com/user/repo%d", i)
 	}
 
 	config := &Config{
-		Workers: 1, // Force sequential processing
+		Workers: workers,
 		Quiet:   true,
 		RepositoryArgs: testRepos,
 		Dependencies: &Dependencies{
@@ -924,10 +921,16 @@ func BenchmarkSequentialProcessing(b *testing.B) {
 		},
 	}
 
+	return config, mockGitCloner
+}
+
+func BenchmarkSequentialProcessing(b *testing.B) {
+	config, _ := setupBenchmarkConfig(1) // Force sequential processing
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Reset mock for each iteration
-		mockGitCloner = &MockGitCloner{ShouldFail: false}
+		mockGitCloner := &MockGitCloner{ShouldFail: false}
 		config.Dependencies.GitClone = mockGitCloner
 		
 		result := processRepositories(config)
@@ -938,33 +941,12 @@ func BenchmarkSequentialProcessing(b *testing.B) {
 }
 
 func BenchmarkParallelProcessing(b *testing.B) {
-	mockGitCloner := &MockGitCloner{ShouldFail: false}
-	mockDirChecker := &MockDirectoryChecker{ExistingDirs: make(map[string]bool)}
-	mockFS := &MockFileSystem{ShouldFailMkdir: false}
-	mockEnv := &DefaultEnvironment{}
-
-	// Create test URLs
-	testRepos := make([]string, 10)
-	for i := 0; i < 10; i++ {
-		testRepos[i] = fmt.Sprintf("https://github.com/user/repo%d", i)
-	}
-
-	config := &Config{
-		Workers: 4, // Use parallel processing
-		Quiet:   true,
-		RepositoryArgs: testRepos,
-		Dependencies: &Dependencies{
-			FS:       mockFS,
-			GitClone: mockGitCloner,
-			DirCheck: mockDirChecker,
-			Env:      mockEnv,
-		},
-	}
+	config, _ := setupBenchmarkConfig(4) // Use parallel processing
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Reset mock for each iteration
-		mockGitCloner = &MockGitCloner{ShouldFail: false}
+		mockGitCloner := &MockGitCloner{ShouldFail: false}
 		config.Dependencies.GitClone = mockGitCloner
 		
 		result := processRepositories(config)
