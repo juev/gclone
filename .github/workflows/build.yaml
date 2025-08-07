@@ -1,7 +1,12 @@
 name: check
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -15,9 +20,9 @@ jobs:
         with:
           version: latest
       -
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.2.0
       - 
         run: go test ./...
         shell: bash
