@@ -261,9 +261,7 @@ func BenchmarkIsDirectoryNotEmptyCache(b *testing.B) {
 	}
 
 	// Clear cache before benchmark
-	dirCache.mutex.Lock()
-	dirCache.cache = make(map[string]cacheEntry)
-	dirCache.mutex.Unlock()
+	dirCache.Clear()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -277,7 +275,7 @@ func BenchmarkIsDirectoryNotEmptyCache(b *testing.B) {
 func BenchmarkNormalizeHTTPS(b *testing.B) {
 	repository := "https://github.com/user/repo.git"
 	// Clear cache before benchmark
-	urlCache.cache = make(map[string]string)
+	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = normalize(repository)
@@ -288,7 +286,7 @@ func BenchmarkNormalizeHTTPS(b *testing.B) {
 func BenchmarkNormalizeSSH(b *testing.B) {
 	repository := "git@github.com:user/repo.git"
 	// Clear cache before benchmark
-	urlCache.cache = make(map[string]string)
+	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = normalize(repository)
@@ -299,7 +297,7 @@ func BenchmarkNormalizeSSH(b *testing.B) {
 func BenchmarkNormalizeGit(b *testing.B) {
 	repository := "git://github.com/user/repo.git"
 	// Clear cache before benchmark  
-	urlCache.cache = make(map[string]string)
+	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = normalize(repository)
@@ -327,7 +325,7 @@ func BenchmarkNormalizeMixed(b *testing.B) {
 		"git@gitlab.com:user/repo5.git",
 	}
 	// Clear cache before benchmark
-	urlCache.cache = make(map[string]string)
+	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = normalize(repositories[i%len(repositories)])
@@ -528,7 +526,7 @@ func TestSecureGitCloneTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := secureGitClone(tt.repository, tempDir, true)
+			err := secureGitClone(tt.repository, tempDir, true, false)
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("secureGitClone() expected error but got none for repository: %s", tt.repository)
@@ -731,7 +729,7 @@ type MockGitCloner struct {
 	mutex      sync.Mutex
 }
 
-func (m *MockGitCloner) Clone(_ context.Context, _, _ string, _ bool) error {
+func (m *MockGitCloner) Clone(_ context.Context, _, _ string, _, _ bool) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.CallCount++

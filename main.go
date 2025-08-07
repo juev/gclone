@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,7 @@ type CommandRunner interface {
 
 // GitCloner abstracts git cloning operations for better testability
 type GitCloner interface {
-	Clone(ctx context.Context, repository, targetDir string, quiet bool) error
+	Clone(ctx context.Context, repository, targetDir string, quiet, shallow bool) error
 }
 
 // DirectoryChecker abstracts directory existence checking for better testability
@@ -108,8 +109,8 @@ func (cr *DefaultCommandRunner) RunWithOutput(ctx context.Context, name string, 
 // DefaultGitCloner provides real git cloning functionality
 type DefaultGitCloner struct{}
 
-func (gc *DefaultGitCloner) Clone(_ context.Context, repository, targetDir string, quiet bool) error {
-	return secureGitClone(repository, targetDir, quiet)
+func (gc *DefaultGitCloner) Clone(_ context.Context, repository, targetDir string, quiet, shallow bool) error {
+	return secureGitClone(repository, targetDir, quiet, shallow)
 }
 
 // DefaultDirectoryChecker provides real directory checking functionality
@@ -179,6 +180,7 @@ type Config struct {
 	ShowCommandHelp   bool
 	ShowVersionInfo   bool
 	Quiet             bool
+	ShallowClone      bool
 	Workers           int
 	RepositoryArgs    []string
 	Dependencies      *Dependencies
@@ -291,7 +293,7 @@ func (wp *WorkerPool) processJob(job RepositoryJob, _ int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	
-	if err := wp.config.Dependencies.GitClone.Clone(ctx, job.Repository, filepath.Dir(projectDir), wp.config.Quiet); err != nil {
+	if err := wp.config.Dependencies.GitClone.Clone(ctx, job.Repository, filepath.Dir(projectDir), wp.config.Quiet, wp.config.ShallowClone); err != nil {
 		result.Error = fmt.Errorf("failed clone repository '%s': %w", job.Repository, err)
 		wp.results <- result
 		return
@@ -724,7 +726,7 @@ func validatePath(path string) error {
 }
 
 // secureGitClone performs git clone with additional security measures including timeout
-func secureGitClone(repository, targetDir string, quiet bool) error {
+func secureGitClone(repository, targetDir string, quiet, shallow bool) error {
 	// Double-check validation (defense in depth)
 	if err := validateRepositoryURL(repository); err != nil {
 		return fmt.Errorf("security validation failed: %w", err)
@@ -741,7 +743,12 @@ func secureGitClone(repository, targetDir string, quiet bool) error {
 	defer cancel()
 
 	// Create command with explicit arguments and timeout context (no shell interpretation)
-	cmd := exec.CommandContext(ctx, "git", "clone", "--", repository)
+	args := []string{"clone"}
+	if shallow {
+		args = append(args, "--depth=1")
+	}
+	args = append(args, "--", repository)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	
 	// Set working directory
 	cmd.Dir = cleanTargetDir
@@ -775,6 +782,7 @@ func parseArgs() (*Config, error) {
 	pflag.BoolVarP(&config.ShowCommandHelp, "help", "h", false, "Show this help message and exit")
 	pflag.BoolVarP(&config.ShowVersionInfo, "version", "v", false, "Show the version number and exit")
 	pflag.BoolVarP(&config.Quiet, "quiet", "q", false, "Suppress output")
+	pflag.BoolVarP(&config.ShallowClone, "shallow", "s", false, "Perform shallow clone with --depth=1")
 	pflag.IntVarP(&config.Workers, "workers", "w", getDefaultWorkers(), "Number of parallel workers for cloning")
 	pflag.Parse()
 
@@ -866,7 +874,7 @@ func processRepositoriesSequential(config *Config) *ProcessingResult {
 		// Security: Use secure git clone with validated arguments
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if err := config.Dependencies.GitClone.Clone(ctx, repository, filepath.Dir(projectDir), config.Quiet); err != nil {
+		if err := config.Dependencies.GitClone.Clone(ctx, repository, filepath.Dir(projectDir), config.Quiet, config.ShallowClone); err != nil {
 			prnt("failed clone repository '%s': %s", repository, err)
 			result.FailedCount++
 			continue
@@ -977,6 +985,13 @@ func (uc *URLCache) Set(key, value string) {
 		uc.cache = make(map[string]string)
 	}
 	uc.cache[key] = value
+}
+
+// Clear removes all entries from the URLCache for test isolation
+func (uc *URLCache) Clear() {
+	uc.mutex.Lock()
+	defer uc.mutex.Unlock()
+	uc.cache = make(map[string]string)
 }
 
 // detectRegexType determines the best regex pattern for the given URL
@@ -1411,14 +1426,10 @@ func (dc *DirCache) evictLRU() {
 		entries = append(entries, entryWithKey{key: key, lastAccess: entry.lastAccess})
 	}
 	
-	// Sort by last access time (oldest first)
-	for i := 0; i < len(entries)-1; i++ {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[i].lastAccess.After(entries[j].lastAccess) {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
+	// Sort by last access time (oldest first) using efficient sort.Slice
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].lastAccess.Before(entries[j].lastAccess)
+	})
 	
 	// Remove oldest entries
 	for i := 0; i < toEvict && i < len(entries); i++ {
@@ -1434,7 +1445,7 @@ func isDirectoryNotEmpty(name string) bool {
 
 // Usage prints the usage of the program.
 func usage() {
-	fmt.Println("usage: gclone [-h] [-v] [-q] [-w WORKERS] [REPOSITORY]")
+	fmt.Println("usage: gclone [-h] [-v] [-q] [-s] [-w WORKERS] [REPOSITORY]")
 	fmt.Println()
 	fmt.Println("positional arguments:")
 	fmt.Println("  REPOSITORY         Repository URL")
@@ -1443,6 +1454,7 @@ func usage() {
 	fmt.Println("  -h, --help         Show this help message and exit")
 	fmt.Println("  -v, --version      Show the version number and exit")
 	fmt.Println("  -q, --quiet        Suppress output")
+	fmt.Println("  -s, --shallow      Perform shallow clone with --depth=1")
 	fmt.Printf("  -w, --workers      Number of parallel workers (default: %d)\n", getDefaultWorkers())
 	fmt.Println()
 	fmt.Println("environment variables:")
