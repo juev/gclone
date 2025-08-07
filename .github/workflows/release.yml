@@ -4,25 +4,27 @@ on:
       - '*'
 
 name: "Create release"
+
+permissions:
+  contents: write
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - 
-        uses: kevincobain2000/action-gobrew@v2
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          version: latest
-      -
-        name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v5
+          go-version: stable
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

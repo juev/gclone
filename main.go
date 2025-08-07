@@ -170,7 +170,7 @@ func NewDependenciesWithCacheConfig(cacheConfig *CacheConfig) *Dependencies {
 }
 
 var (
-	version = "0.3.4"
+	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 )
