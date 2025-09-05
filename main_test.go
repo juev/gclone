@@ -75,6 +75,13 @@ func Test_getProjectDir(t *testing.T) {
 			gitProjectDir: "src",
 			want:          "src/github.com/go-git/go-git",
 		},
+		{
+			name:          "src",
+			repository:    "http://zod.bitterling-ghost.ts.net/juev/test.git",
+			homeVar:       "/home/test",
+			gitProjectDir: "src",
+			want:          "src/zod.bitterling-ghost.ts.net/juev/test",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -296,7 +303,7 @@ func BenchmarkNormalizeSSH(b *testing.B) {
 // BenchmarkNormalizeGit benchmarks Git protocol URL parsing
 func BenchmarkNormalizeGit(b *testing.B) {
 	repository := "git://github.com/user/repo.git"
-	// Clear cache before benchmark  
+	// Clear cache before benchmark
 	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -319,7 +326,7 @@ func BenchmarkNormalizeCached(b *testing.B) {
 func BenchmarkNormalizeMixed(b *testing.B) {
 	repositories := []string{
 		"https://github.com/user/repo1.git",
-		"git@github.com:user/repo2.git", 
+		"git@github.com:user/repo2.git",
 		"git://github.com/user/repo3.git",
 		"https://gitlab.com/user/repo4.git",
 		"git@gitlab.com:user/repo5.git",
@@ -345,7 +352,7 @@ func BenchmarkSanitizePathOptimized(b *testing.B) {
 func BenchmarkDetectRegexType(b *testing.B) {
 	urls := []string{
 		"https://github.com/user/repo.git",
-		"git@github.com:user/repo.git", 
+		"git@github.com:user/repo.git",
 		"git://github.com/user/repo.git",
 		"github.com/user/repo",
 	}
@@ -511,13 +518,13 @@ func TestSecureGitCloneTimeout(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name:        "dangerous URL should fail validation", 
+			name:        "dangerous URL should fail validation",
 			repository:  "https://github.com/user/repo; rm -rf /",
 			expectError: true,
 			errorMsg:    "security validation failed",
 		},
 		{
-			name:        "path traversal should fail validation", 
+			name:        "path traversal should fail validation",
 			repository:  "https://github.com/../../../etc/passwd",
 			expectError: true,
 			errorMsg:    "security validation failed",
@@ -908,8 +915,8 @@ func setupBenchmarkConfig(workers int) (*Config, *MockGitCloner) {
 	}
 
 	config := &Config{
-		Workers: workers,
-		Quiet:   true,
+		Workers:        workers,
+		Quiet:          true,
 		RepositoryArgs: testRepos,
 		Dependencies: &Dependencies{
 			FS:       mockFS,
@@ -930,7 +937,7 @@ func BenchmarkSequentialProcessing(b *testing.B) {
 		// Reset mock for each iteration
 		mockGitCloner := &MockGitCloner{ShouldFail: false}
 		config.Dependencies.GitClone = mockGitCloner
-		
+
 		result := processRepositories(config)
 		if result.ProcessedCount != 10 {
 			b.Errorf("Expected 10 processed, got %d", result.ProcessedCount)
@@ -946,7 +953,7 @@ func BenchmarkParallelProcessing(b *testing.B) {
 		// Reset mock for each iteration
 		mockGitCloner := &MockGitCloner{ShouldFail: false}
 		config.Dependencies.GitClone = mockGitCloner
-		
+
 		result := processRepositories(config)
 		if result.ProcessedCount != 10 {
 			b.Errorf("Expected 10 processed, got %d", result.ProcessedCount)
@@ -961,8 +968,8 @@ func BenchmarkWorkerPoolCreation(b *testing.B) {
 	mockEnv := &DefaultEnvironment{}
 
 	config := &Config{
-		Workers: 4,
-		Quiet:   true,
+		Workers:        4,
+		Quiet:          true,
 		RepositoryArgs: []string{"https://github.com/user/repo"},
 		Dependencies: &Dependencies{
 			FS:       mockFS,
@@ -976,5 +983,66 @@ func BenchmarkWorkerPoolCreation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		wp := NewWorkerPool(config)
 		_ = wp // Prevent compiler optimization
+	}
+}
+
+func Test_detectRegexType(t *testing.T) {
+	type args struct {
+		repo string
+	}
+	tests := []struct {
+		name string
+		args args
+		want RegexType
+	}{
+		{
+			name: "https",
+			args: args{
+				repo: "https://github.com/user/repo.git",
+			},
+			want: RegexHTTPS,
+		},
+		{
+			name: "ssh",
+			args: args{
+				repo: "git@github.com:user/repo.git",
+			},
+			want: RegexSSH,
+		},
+		{
+			name: "http protocol",
+			args: args{
+				repo: "http://github.com/user/repo.git",
+			},
+			want: RegexHTTPS,
+		},
+		{
+			name: "git protocol",
+			args: args{
+				repo: "git://github.com/user/repo.git",
+			},
+			want: RegexGit,
+		},
+		{
+			name: "generic format",
+			args: args{
+				repo: "github.com/user/repo",
+			},
+			want: RegexGeneric,
+		},
+		{
+			name: "ssh with ssh prefix",
+			args: args{
+				repo: "ssh://git@github.com:user/repo.git",
+			},
+			want: RegexSSH,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectRegexType(tt.args.repo); got != tt.want {
+				t.Errorf("detectRegexType() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
