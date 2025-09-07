@@ -1087,7 +1087,7 @@ func normalize(repo string) (string, error) {
 		}
 		// Validate array bounds before access
 		if len(match) <= 2 {
-			return "", errors.New("Generic repository URL match does not contain expected groups")
+			return "", errors.New("generic repository URL match does not contain expected groups")
 		}
 		host, path = match[1], match[2]
 	}
