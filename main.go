@@ -468,6 +468,7 @@ var (
 	}
 
 	// SSH URLs (git@github.com:user/repo.git or ssh://user@host:port/path)
+	// Handles both SSH URL formats with optional port support
 	sshRegexPool = sync.Pool{
 		New: func() any {
 			return regexp.MustCompile(`^(?:ssh://)?([^@]+)@([^/:]+)(?::(\d+))?[:/](.+?)(?:\.git)?/?$`)
@@ -1064,11 +1065,15 @@ func normalize(repo string) (string, error) {
 		if len(match) != 3 {
 			return "", errors.New("failed to parse HTTPS/Git repository URL format")
 		}
+		// Validate array bounds before access
+		if len(match) <= 2 {
+			return "", errors.New("HTTPS/Git repository URL match does not contain expected groups")
+		}
 		host, path = match[1], match[2]
 
 	case RegexSSH:
 		match := r.FindStringSubmatch(repo)
-		if len(match) < 4 {
+		if len(match) < 5 {
 			return "", errors.New("failed to parse SSH repository URL format")
 		}
 		// match[1] = user, match[2] = host, match[3] = port (optional), match[4] = path
@@ -1079,6 +1084,10 @@ func normalize(repo string) (string, error) {
 		match := r.FindStringSubmatch(repo)
 		if len(match) != 3 {
 			return "", errors.New("failed to parse repository URL format")
+		}
+		// Validate array bounds before access
+		if len(match) <= 2 {
+			return "", errors.New("Generic repository URL match does not contain expected groups")
 		}
 		host, path = match[1], match[2]
 	}
