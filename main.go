@@ -1069,7 +1069,7 @@ func normalize(repo string) (string, error) {
 
 	case RegexSSH:
 		match := r.FindStringSubmatch(repo)
-		if len(match) < 5 {
+		if len(match) != 5 {
 			return "", errors.New("failed to parse SSH repository URL format")
 		}
 		// match[1] = user, match[2] = host, match[3] = port (optional), match[4] = path
