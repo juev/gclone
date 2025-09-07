@@ -58,7 +58,7 @@ type Environment interface {
 // Dependencies holds all external dependencies for the application
 type Dependencies struct {
 	FS       FileSystem
-	CmdRun   CommandRunner  
+	CmdRun   CommandRunner
 	GitClone GitCloner
 	DirCheck DirectoryChecker
 	Env      Environment
@@ -177,14 +177,14 @@ var (
 
 // Config holds the configuration for the application
 type Config struct {
-	ShowCommandHelp   bool
-	ShowVersionInfo   bool
-	Quiet             bool
-	ShallowClone      bool
-	Workers           int
-	RepositoryArgs    []string
-	Dependencies      *Dependencies
-	CacheConfig       *CacheConfig
+	ShowCommandHelp bool
+	ShowVersionInfo bool
+	Quiet           bool
+	ShallowClone    bool
+	Workers         int
+	RepositoryArgs  []string
+	Dependencies    *Dependencies
+	CacheConfig     *CacheConfig
 }
 
 // ProcessingResult holds the result of repository processing
@@ -292,7 +292,7 @@ func (wp *WorkerPool) processJob(job RepositoryJob, _ int) {
 	// Security: Use secure git clone with validated arguments
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	
+
 	if err := wp.config.Dependencies.GitClone.Clone(ctx, job.Repository, filepath.Dir(projectDir), wp.config.Quiet, wp.config.ShallowClone); err != nil {
 		result.Error = fmt.Errorf("failed clone repository '%s': %w", job.Repository, err)
 		wp.results <- result
@@ -340,7 +340,7 @@ func (wp *WorkerPool) Start() *ProcessingResult {
 		case workerResult := <-wp.results:
 			result.ProcessedCount++
 			processedCount++
-			
+
 			if workerResult.Success {
 				result.LastSuccessfulProjectDir = workerResult.ProjectDir
 			} else {
@@ -420,7 +420,7 @@ func (wp *WorkerPool) StartWithSignalHandling() *ProcessingResult {
 			fmt.Fprintf(os.Stderr, "\nReceived signal %v, initiating graceful shutdown...\n", sig)
 		}
 		wp.gracefulShutdown()
-		
+
 		// Wait for result with timeout
 		select {
 		case result := <-resultChan:
@@ -466,21 +466,22 @@ var (
 			return regexp.MustCompile(`^https?://([^/]+)/(.+?)(?:\.git)?/?$`)
 		},
 	}
-	
-	// SSH URLs (git@github.com:user/repo.git)
+
+	// SSH URLs (git@github.com:user/repo.git or ssh://user@host:port/path)
+	// Handles both SSH URL formats with optional port support
 	sshRegexPool = sync.Pool{
 		New: func() any {
-			return regexp.MustCompile(`^(?:ssh://)?([^@]+)@([^:]+):(.+?)(?:\.git)?/?$`)
+			return regexp.MustCompile(`^(?:ssh://)?([^@]+)@([^/:]+)(?::(\d+))?[:/](.+?)(?:\.git)?/?$`)
 		},
 	}
-	
+
 	// Git protocol URLs (git://github.com/user/repo.git)
 	gitRegexPool = sync.Pool{
 		New: func() any {
 			return regexp.MustCompile(`^git://([^/]+)/(.+?)(?:\.git)?/?$`)
 		},
 	}
-	
+
 	// Generic fallback regex pool (original pattern)
 	genericRegexPool = sync.Pool{
 		New: func() any {
@@ -522,7 +523,7 @@ func GetRegexStats() RegexPoolStats {
 func (stats *RegexPoolStats) incrementUsage(regexType RegexType) {
 	stats.mutex.Lock()
 	defer stats.mutex.Unlock()
-	
+
 	switch regexType {
 	case RegexHTTPS:
 		stats.HTTPSUsage++
@@ -551,34 +552,34 @@ func (stats *RegexPoolStats) incrementCacheMiss() {
 
 // CacheConfig holds configuration parameters for directory cache
 type CacheConfig struct {
-	TTL                  time.Duration
-	CleanupInterval      time.Duration
-	MaxEntries          int
+	TTL                   time.Duration
+	CleanupInterval       time.Duration
+	MaxEntries            int
 	EnablePeriodicCleanup bool
 }
 
 // DefaultCacheConfig returns default cache configuration
 func DefaultCacheConfig() *CacheConfig {
 	return &CacheConfig{
-		TTL:                  60 * time.Second, // Increased from 30s to 1 minute
-		CleanupInterval:      5 * time.Minute,
-		MaxEntries:          1000,
+		TTL:                   60 * time.Second, // Increased from 30s to 1 minute
+		CleanupInterval:       5 * time.Minute,
+		MaxEntries:            1000,
 		EnablePeriodicCleanup: true,
 	}
 }
 
 type cacheEntry struct {
-	exists    bool
-	timestamp time.Time
+	exists     bool
+	timestamp  time.Time
 	lastAccess time.Time
 }
 
 // CacheStats holds statistics about cache performance
 type CacheStats struct {
-	Hits       int64
-	Misses     int64
-	Evictions  int64
-	TotalSize  int64
+	Hits      int64
+	Misses    int64
+	Evictions int64
+	TotalSize int64
 }
 
 // CachePerformance provides cache performance metrics
@@ -612,15 +613,15 @@ var (
 		"ssh":   true,
 		"git":   true,
 	}
-	
+
 	// Dangerous characters that could be used for command injection
 	dangerousChars = regexp.MustCompile(`[;&|$\x60<>(){}[\]!*?]`)
-	
+
 	// Valid hostname pattern - more restrictive than RFC but safer
 	validHostname = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$`)
-	
+
 	// Valid path characters for Git repositories
-	validRepoPath = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
+	validRepoPath = regexp.MustCompile(`^[a-zA-Z0-9._/~-]+$`)
 )
 
 // validateRepositoryURL performs comprehensive security validation of repository URLs
@@ -749,10 +750,10 @@ func secureGitClone(repository, targetDir string, quiet, shallow bool) error {
 	}
 	args = append(args, "--", repository)
 	cmd := exec.CommandContext(ctx, "git", args...)
-	
+
 	// Set working directory
 	cmd.Dir = cleanTargetDir
-	
+
 	// Configure output
 	if !quiet {
 		cmd.Stdout = os.Stderr
@@ -766,7 +767,7 @@ func secureGitClone(repository, targetDir string, quiet, shallow bool) error {
 		}
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -778,7 +779,7 @@ func parseArgs() (*Config, error) {
 		CacheConfig:  cacheConfig,
 		Workers:      getDefaultWorkers(),
 	}
-	
+
 	pflag.BoolVarP(&config.ShowCommandHelp, "help", "h", false, "Show this help message and exit")
 	pflag.BoolVarP(&config.ShowVersionInfo, "version", "v", false, "Show the version number and exit")
 	pflag.BoolVarP(&config.Quiet, "quiet", "q", false, "Suppress output")
@@ -787,7 +788,7 @@ func parseArgs() (*Config, error) {
 	pflag.Parse()
 
 	config.RepositoryArgs = pflag.Args()
-	
+
 	// Validate workers count
 	if config.Workers < 1 {
 		return nil, errors.New("workers count must be at least 1")
@@ -795,7 +796,7 @@ func parseArgs() (*Config, error) {
 	if config.Workers > 32 {
 		return nil, errors.New("workers count cannot exceed 32")
 	}
-	
+
 	// Validate that we have arguments (unless help or version is requested)
 	if !config.ShowCommandHelp && !config.ShowVersionInfo && len(config.RepositoryArgs) == 0 {
 		return nil, errors.New("no repository URLs provided")
@@ -826,7 +827,7 @@ func processRepositories(config *Config) *ProcessingResult {
 	if len(config.RepositoryArgs) == 1 || config.Workers == 1 {
 		return processRepositoriesSequential(config)
 	}
-	
+
 	// Use worker pool for multiple repositories with multiple workers
 	wp := NewWorkerPool(config)
 	return wp.StartWithSignalHandling()
@@ -839,7 +840,7 @@ func processRepositoriesSequential(config *Config) *ProcessingResult {
 	for _, arg := range config.RepositoryArgs {
 		repository := strings.TrimSpace(arg)
 		result.ProcessedCount++
-		
+
 		// Security: Validate repository URL before processing
 		if err := validateRepositoryURL(repository); err != nil {
 			prnt("invalid repository URL '%s': %s", repository, err)
@@ -895,7 +896,7 @@ func printSummary(config *Config, result *ProcessingResult) {
 	// Print summary if multiple repositories were processed
 	if result.ProcessedCount > 1 && !config.Quiet {
 		successCount := result.ProcessedCount - result.FailedCount
-		prnt("processed %d repositories: %d successful, %d failed", 
+		prnt("processed %d repositories: %d successful, %d failed",
 			result.ProcessedCount, successCount, result.FailedCount)
 	}
 
@@ -957,13 +958,13 @@ func main() {
 
 // URLCache provides caching for normalized URLs to avoid repeated parsing
 type URLCache struct {
-	cache map[string]string
-	mutex sync.RWMutex
+	cache      map[string]string
+	mutex      sync.RWMutex
 	maxEntries int
 }
 
 var urlCache = &URLCache{
-	cache: make(map[string]string),
+	cache:      make(map[string]string),
 	maxEntries: 1000,
 }
 
@@ -979,7 +980,7 @@ func (uc *URLCache) Get(key string) (string, bool) {
 func (uc *URLCache) Set(key, value string) {
 	uc.mutex.Lock()
 	defer uc.mutex.Unlock()
-	
+
 	// Simple eviction strategy: clear cache when full
 	if len(uc.cache) >= uc.maxEntries {
 		uc.cache = make(map[string]string)
@@ -996,14 +997,20 @@ func (uc *URLCache) Clear() {
 
 // detectRegexType determines the best regex pattern for the given URL
 func detectRegexType(repo string) RegexType {
-	if len(repo) > 8 && (repo[:7] == "https://" || repo[:7] == "http://") {
+	// Check for HTTPS/HTTP URLs first
+	if strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "http://") {
 		return RegexHTTPS
+	}
+	// Check for Git protocol URLs
+	if strings.HasPrefix(repo, "git://") {
+		return RegexGit
+	}
+	// Check for SSH URLs (ssh:// prefix or git@host:path format)
+	if strings.HasPrefix(repo, "ssh://") {
+		return RegexSSH
 	}
 	if strings.Contains(repo, "@") && strings.Contains(repo, ":") && !strings.Contains(repo, "://") {
 		return RegexSSH
-	}
-	if len(repo) > 6 && repo[:6] == "git://" {
-		return RegexGit
 	}
 	return RegexGeneric
 }
@@ -1050,7 +1057,7 @@ func normalize(repo string) (string, error) {
 	defer putBack(r)
 
 	var host, path string
-	
+
 	// Handle different URL patterns
 	switch regexType {
 	case RegexHTTPS, RegexGit:
@@ -1059,14 +1066,16 @@ func normalize(repo string) (string, error) {
 			return "", errors.New("failed to parse HTTPS/Git repository URL format")
 		}
 		host, path = match[1], match[2]
-		
+
 	case RegexSSH:
 		match := r.FindStringSubmatch(repo)
-		if len(match) != 4 {
+		if len(match) != 5 {
 			return "", errors.New("failed to parse SSH repository URL format")
 		}
-		host, path = match[2], match[3]
-		
+		// match[1] = user, match[2] = host, match[3] = port (optional), match[4] = path
+		// For hostname validation, we only use the host part (without port)
+		host, path = match[2], match[4]
+
 	default: // RegexGeneric
 		match := r.FindStringSubmatch(repo)
 		if len(match) != 3 {
@@ -1092,10 +1101,10 @@ func normalize(repo string) (string, error) {
 	}
 
 	result := filepath.Join(host, sanitizedPath)
-	
+
 	// Cache the result
 	urlCache.Set(repo, result)
-	
+
 	return result, nil
 }
 
@@ -1112,25 +1121,25 @@ func sanitizePathWithError(path string) (string, error) {
 	// Use string slicing to avoid multiple allocations
 	for {
 		originalLen := len(path)
-		
+
 		// Remove leading slashes and tildes
 		if len(path) > 0 && (path[0] == '/' || path[0] == '~') {
 			path = path[1:]
 			continue
 		}
-		
+
 		// Remove trailing slashes
 		if len(path) > 0 && path[len(path)-1] == '/' {
 			path = path[:len(path)-1]
 			continue
 		}
-		
+
 		// Remove .git suffix
 		if len(path) >= 4 && path[len(path)-4:] == ".git" {
 			path = path[:len(path)-4]
 			continue
 		}
-		
+
 		// If no changes were made, break
 		if len(path) == originalLen {
 			break
@@ -1173,25 +1182,25 @@ func sanitizePath(path string) string {
 	// Use string slicing to avoid multiple allocations
 	for {
 		originalLen := len(path)
-		
+
 		// Remove leading slashes and tildes
 		if len(path) > 0 && (path[0] == '/' || path[0] == '~') {
 			path = path[1:]
 			continue
 		}
-		
+
 		// Remove trailing slashes
 		if len(path) > 0 && path[len(path)-1] == '/' {
 			path = path[:len(path)-1]
 			continue
 		}
-		
+
 		// Remove .git suffix
 		if len(path) >= 4 && path[len(path)-4:] == ".git" {
 			path = path[:len(path)-4]
 			continue
 		}
-		
+
 		// If no changes were made, break
 		if len(path) == originalLen {
 			break
@@ -1231,7 +1240,7 @@ func sanitizePath(path string) string {
 // Returns error for better error handling instead of empty string.
 func getProjectDir(repository string, env Environment) (string, error) {
 	gitProjectDir := env.Getenv("GIT_PROJECT_DIR")
-	
+
 	if len(gitProjectDir) > 0 && gitProjectDir[0] == '~' {
 		homeDir, err := env.UserHomeDir()
 		if err != nil {
@@ -1248,7 +1257,7 @@ func getProjectDir(repository string, env Environment) (string, error) {
 	// Security: Validate and clean the final path
 	projectDir := filepath.Join(gitProjectDir, normalizedRepo)
 	cleanedPath := filepath.Clean(projectDir)
-	
+
 	// Security: Ensure the path doesn't escape the base directory
 	if gitProjectDir != "" {
 		cleanGitProjectDir := filepath.Clean(gitProjectDir)
@@ -1280,19 +1289,19 @@ func NewDirCache(config *CacheConfig, fs FileSystem) *DirCache {
 	if config == nil {
 		config = DefaultCacheConfig()
 	}
-	
+
 	dc := &DirCache{
 		cache:       make(map[string]cacheEntry),
 		config:      config,
 		fs:          fs,
 		stopCleanup: make(chan struct{}),
 	}
-	
+
 	// Start periodic cleanup if enabled
 	if config.EnablePeriodicCleanup {
 		go dc.startPeriodicCleanup()
 	}
-	
+
 	return dc
 }
 
@@ -1307,7 +1316,7 @@ func (dc *DirCache) Close() {
 func (dc *DirCache) startPeriodicCleanup() {
 	ticker := time.NewTicker(dc.config.CleanupInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -1323,7 +1332,7 @@ func (dc *DirCache) cleanup() {
 	now := time.Now()
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	evictionCount := 0
 	for key, entry := range dc.cache {
 		if now.Sub(entry.timestamp) > dc.config.TTL {
@@ -1331,7 +1340,7 @@ func (dc *DirCache) cleanup() {
 			evictionCount++
 		}
 	}
-	
+
 	dc.stats.Evictions += int64(evictionCount)
 	dc.stats.TotalSize = int64(len(dc.cache))
 }
@@ -1340,7 +1349,7 @@ func (dc *DirCache) cleanup() {
 func (dc *DirCache) GetStats() CacheStats {
 	dc.mutex.RLock()
 	defer dc.mutex.RUnlock()
-	
+
 	stats := dc.stats
 	stats.TotalSize = int64(len(dc.cache))
 	return stats
@@ -1350,7 +1359,7 @@ func (dc *DirCache) GetStats() CacheStats {
 func (dc *DirCache) Clear() {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	dc.cache = make(map[string]cacheEntry)
 	dc.stats = CacheStats{}
 }
@@ -1358,7 +1367,7 @@ func (dc *DirCache) Clear() {
 // IsDirectoryNotEmpty checks if the specified directory is not empty with caching.
 func (dc *DirCache) IsDirectoryNotEmpty(name string) bool {
 	now := time.Now()
-	
+
 	// Try to get from cache first (optimistic read)
 	dc.mutex.RLock()
 	if entry, ok := dc.cache[name]; ok {
@@ -1382,10 +1391,10 @@ func (dc *DirCache) IsDirectoryNotEmpty(name string) bool {
 	} else {
 		dc.mutex.RUnlock()
 	}
-	
+
 	// Cache miss or expired entry - check directory
 	exists := isDirectoryNotEmptyRaw(name, dc.fs)
-	
+
 	// Update cache with new entry
 	dc.mutex.Lock()
 	dc.cache[name] = cacheEntry{
@@ -1394,14 +1403,14 @@ func (dc *DirCache) IsDirectoryNotEmpty(name string) bool {
 		lastAccess: now,
 	}
 	dc.stats.Misses++
-	
+
 	// Check if cache size exceeds limit and evict LRU entries if needed
 	if dc.config.MaxEntries > 0 && len(dc.cache) > dc.config.MaxEntries {
 		dc.evictLRU()
 	}
-	
+
 	dc.mutex.Unlock()
-	
+
 	return exists
 }
 
@@ -1410,27 +1419,27 @@ func (dc *DirCache) evictLRU() {
 	// Find entries to evict (remove 10% of cache when limit is exceeded)
 	targetSize := int(float64(dc.config.MaxEntries) * 0.9)
 	toEvict := len(dc.cache) - targetSize
-	
+
 	if toEvict <= 0 {
 		return
 	}
-	
+
 	// Create slice of entries with their keys for sorting
 	type entryWithKey struct {
-		key       string
+		key        string
 		lastAccess time.Time
 	}
-	
+
 	entries := make([]entryWithKey, 0, len(dc.cache))
 	for key, entry := range dc.cache {
 		entries = append(entries, entryWithKey{key: key, lastAccess: entry.lastAccess})
 	}
-	
+
 	// Sort by last access time (oldest first) using efficient sort.Slice
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].lastAccess.Before(entries[j].lastAccess)
 	})
-	
+
 	// Remove oldest entries
 	for i := 0; i < toEvict && i < len(entries); i++ {
 		delete(dc.cache, entries[i].key)
