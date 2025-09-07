@@ -1033,7 +1033,7 @@ func Test_detectRegexType(t *testing.T) {
 		{
 			name: "ssh with ssh prefix",
 			args: args{
-				repo: "ssh://git@github.com:user/repo.git",
+				repo: "ssh://git@github.com/user/repo.git",
 			},
 			want: RegexSSH,
 		},

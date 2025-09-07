@@ -1065,10 +1065,6 @@ func normalize(repo string) (string, error) {
 		if len(match) != 3 {
 			return "", errors.New("failed to parse HTTPS/Git repository URL format")
 		}
-		// Validate array bounds before access
-		if len(match) <= 2 {
-			return "", errors.New("HTTPS/Git repository URL match does not contain expected groups")
-		}
 		host, path = match[1], match[2]
 
 	case RegexSSH:
@@ -1084,10 +1080,6 @@ func normalize(repo string) (string, error) {
 		match := r.FindStringSubmatch(repo)
 		if len(match) != 3 {
 			return "", errors.New("failed to parse repository URL format")
-		}
-		// Validate array bounds before access
-		if len(match) <= 2 {
-			return "", errors.New("generic repository URL match does not contain expected groups")
 		}
 		host, path = match[1], match[2]
 	}
