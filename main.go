@@ -1130,11 +1130,9 @@ func (dc *DirCache) cleanup() {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
 
-	evictionCount := 0
 	for key, entry := range dc.cache {
 		if now.Sub(entry.timestamp) > dc.config.TTL {
 			delete(dc.cache, key)
-			evictionCount++
 		}
 	}
 }
