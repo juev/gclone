@@ -179,7 +179,6 @@ function gbulk {
 
 - **Parallel Workers** - Configurable concurrent cloning (1-32 workers)
 - **Smart Caching** - LRU cache for directory existence checks
-- **Regex Pooling** - Optimized URL parsing with pattern-specific regex
 - **Sequential Fallback** - Automatic optimization for single repositories
 - **Memory Efficient** - Streaming directory reads, minimal allocations
 
@@ -217,7 +216,7 @@ Contributions are welcome! The codebase features:
 - **Dependency Injection** - Clean interfaces for testability
 - **Comprehensive Testing** - Full test coverage with mocks
 - **Security Focus** - Multiple layers of validation
-- **Performance Optimization** - Caching, pooling, and parallelization
+- **Performance Optimization** - Caching and parallelization
 
 ## 📄 License
 

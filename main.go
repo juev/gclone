@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -109,8 +110,8 @@ func (cr *DefaultCommandRunner) RunWithOutput(ctx context.Context, name string, 
 // DefaultGitCloner provides real git cloning functionality
 type DefaultGitCloner struct{}
 
-func (gc *DefaultGitCloner) Clone(_ context.Context, repository, targetDir string, quiet, shallow bool) error {
-	return secureGitClone(repository, targetDir, quiet, shallow)
+func (gc *DefaultGitCloner) Clone(ctx context.Context, repository, targetDir string, quiet, shallow bool) error {
+	return secureGitClone(ctx, repository, targetDir, quiet, shallow)
 }
 
 // DefaultDirectoryChecker provides real directory checking functionality
@@ -210,12 +211,13 @@ type WorkerResult struct {
 
 // WorkerPool manages parallel repository cloning
 type WorkerPool struct {
-	config      *Config
-	jobs        chan RepositoryJob
-	results     chan WorkerResult
-	done        chan struct{}
-	shutdown    chan struct{}
-	workerCount int32 // Track active workers for graceful shutdown
+	config       *Config
+	jobs         chan RepositoryJob
+	results      chan WorkerResult
+	done         chan struct{}
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
+	workerCount  int32
 }
 
 // NewWorkerPool creates a new worker pool for parallel repository cloning
@@ -247,63 +249,55 @@ func (wp *WorkerPool) worker(workerID int) {
 	}
 }
 
-// processJob processes a single repository cloning job
-func (wp *WorkerPool) processJob(job RepositoryJob, _ int) {
-	result := WorkerResult{
-		Job:     job,
-		Success: false,
+// processOneRepository validates, resolves, and clones a single repository.
+// Returns the project directory and an error if any step fails.
+func processOneRepository(config *Config, repository string) (string, error) {
+	if err := validateRepositoryURL(repository); err != nil {
+		return "", fmt.Errorf("invalid repository URL '%s': %w", repository, err)
 	}
 
-	// Security: Validate repository URL before processing
-	if err := validateRepositoryURL(job.Repository); err != nil {
-		result.Error = fmt.Errorf("invalid repository URL '%s': %w", job.Repository, err)
-		wp.results <- result
-		return
-	}
-
-	projectDir, err := getProjectDir(job.Repository, wp.config.Dependencies.Env)
+	projectDir, err := getProjectDir(repository, config.Dependencies.Env)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to determine project directory for '%s': %w", job.Repository, err)
-		wp.results <- result
-		return
+		return "", fmt.Errorf("failed to determine project directory for '%s': %w", repository, err)
 	}
 
-	// Set project directory in result for potential success case
-	result.ProjectDir = projectDir
-
-	// Check if directory already exists and is not empty
-	if wp.config.Dependencies.DirCheck.IsNotEmpty(projectDir) {
-		if !wp.config.Quiet {
-			// Thread-safe output using stderr
+	if config.Dependencies.DirCheck.IsNotEmpty(projectDir) {
+		if !config.Quiet {
 			fmt.Fprintf(os.Stderr, "repository already exists: %s\n", projectDir)
 		}
-		result.Success = true
-		wp.results <- result
-		return
+		return projectDir, nil
 	}
 
-	// Create parent directory
-	if err := wp.config.Dependencies.FS.MkdirAll(filepath.Dir(projectDir), 0750); err != nil {
-		result.Error = fmt.Errorf("failed create directory: %w", err)
-		wp.results <- result
-		return
+	if err := config.Dependencies.FS.MkdirAll(filepath.Dir(projectDir), 0750); err != nil {
+		return "", fmt.Errorf("failed create directory: %w", err)
 	}
 
-	// Security: Use secure git clone with validated arguments
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	if err := wp.config.Dependencies.GitClone.Clone(ctx, job.Repository, filepath.Dir(projectDir), wp.config.Quiet, wp.config.ShallowClone); err != nil {
-		result.Error = fmt.Errorf("failed clone repository '%s': %w", job.Repository, err)
+	if err := config.Dependencies.GitClone.Clone(ctx, repository, filepath.Dir(projectDir), config.Quiet, config.ShallowClone); err != nil {
+		return "", fmt.Errorf("failed clone repository '%s': %w", repository, err)
+	}
+
+	if !config.Quiet {
+		fmt.Fprintln(os.Stderr)
+	}
+
+	return projectDir, nil
+}
+
+func (wp *WorkerPool) processJob(job RepositoryJob, _ int) {
+	result := WorkerResult{Job: job}
+
+	projectDir, err := processOneRepository(wp.config, job.Repository)
+	if err != nil {
+		result.Error = err
 		wp.results <- result
 		return
 	}
 
-	// Clone was successful
+	result.ProjectDir = projectDir
 	result.Success = true
-	if !wp.config.Quiet {
-		fmt.Fprintln(os.Stderr)
-	}
 	wp.results <- result
 }
 
@@ -346,21 +340,30 @@ func (wp *WorkerPool) Start() *ProcessingResult {
 			} else {
 				result.FailedCount++
 				if workerResult.Error != nil {
-					prnt(workerResult.Error.Error())
+					prntf(workerResult.Error.Error())
 				}
 			}
 		case <-wp.shutdown:
-			// Graceful shutdown requested
 			wp.gracefulShutdown()
-			// Continue collecting results for already started jobs
-			for processedCount < result.ProcessedCount {
-				workerResult := <-wp.results
-				processedCount++
-				if !workerResult.Success {
-					result.FailedCount++
+			wp.waitForWorkers()
+			// Drain remaining results from in-flight jobs
+			for {
+				select {
+				case workerResult := <-wp.results:
+					result.ProcessedCount++
+					processedCount++
+					if workerResult.Success {
+						result.LastSuccessfulProjectDir = workerResult.ProjectDir
+					} else {
+						result.FailedCount++
+						if workerResult.Error != nil {
+							prntf(workerResult.Error.Error())
+						}
+					}
+				default:
+					return result
 				}
 			}
-			return result
 		}
 	}
 
@@ -373,7 +376,9 @@ func (wp *WorkerPool) Start() *ProcessingResult {
 
 // gracefulShutdown signals all workers to shut down
 func (wp *WorkerPool) gracefulShutdown() {
-	close(wp.shutdown)
+	wp.shutdownOnce.Do(func() {
+		close(wp.shutdown)
+	})
 }
 
 // waitForWorkers waits for all workers to finish gracefully
@@ -458,97 +463,12 @@ const (
 	RegexGeneric
 )
 
-// Specialized regex pools for different URL patterns
 var (
-	// HTTPS URLs (https://github.com/user/repo.git)
-	httpsRegexPool = sync.Pool{
-		New: func() any {
-			return regexp.MustCompile(`^https?://([^/]+)/(.+?)(?:\.git)?/?$`)
-		},
-	}
-
-	// SSH URLs (git@github.com:user/repo.git or ssh://user@host:port/path)
-	// Handles both SSH URL formats with optional port support
-	sshRegexPool = sync.Pool{
-		New: func() any {
-			return regexp.MustCompile(`^(?:ssh://)?([^@]+)@([^/:]+)(?::(\d+))?[:/](.+?)(?:\.git)?/?$`)
-		},
-	}
-
-	// Git protocol URLs (git://github.com/user/repo.git)
-	gitRegexPool = sync.Pool{
-		New: func() any {
-			return regexp.MustCompile(`^git://([^/]+)/(.+?)(?:\.git)?/?$`)
-		},
-	}
-
-	// Generic fallback regex pool (original pattern)
-	genericRegexPool = sync.Pool{
-		New: func() any {
-			return regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?[/:]?(.*)$`)
-		},
-	}
+	httpsRegex   = regexp.MustCompile(`^https?://([^/]+)/(.+?)(?:\.git)?/?$`)
+	sshRegex     = regexp.MustCompile(`^(?:ssh://)?([^@]+)@([^/:]+)(?::(\d+))?[:/](.+?)(?:\.git)?/?$`)
+	gitRegex     = regexp.MustCompile(`^git://([^/]+)/(.+?)(?:\.git)?/?$`)
+	genericRegex = regexp.MustCompile(`^(?:.*://)?(?:[^@]+@)?([^:/]+)(?::\d+)?[/:]?(.*)$`)
 )
-
-// RegexPoolStats tracks usage statistics for regex pools
-type RegexPoolStats struct {
-	HTTPSUsage   int64
-	SSHUsage     int64
-	GitUsage     int64
-	GenericUsage int64
-	CacheHits    int64
-	CacheMisses  int64
-	mutex        sync.RWMutex
-}
-
-var regexStats = &RegexPoolStats{}
-
-// GetRegexStats returns current regex usage statistics
-func GetRegexStats() RegexPoolStats {
-	regexStats.mutex.RLock()
-	defer regexStats.mutex.RUnlock()
-	// Return a copy to avoid returning the mutex
-	return RegexPoolStats{
-		HTTPSUsage:   regexStats.HTTPSUsage,
-		SSHUsage:     regexStats.SSHUsage,
-		GitUsage:     regexStats.GitUsage,
-		GenericUsage: regexStats.GenericUsage,
-		CacheHits:    regexStats.CacheHits,
-		CacheMisses:  regexStats.CacheMisses,
-		// Don't copy the mutex
-	}
-}
-
-// incrementUsage atomically increments usage counter for specific regex type
-func (stats *RegexPoolStats) incrementUsage(regexType RegexType) {
-	stats.mutex.Lock()
-	defer stats.mutex.Unlock()
-
-	switch regexType {
-	case RegexHTTPS:
-		stats.HTTPSUsage++
-	case RegexSSH:
-		stats.SSHUsage++
-	case RegexGit:
-		stats.GitUsage++
-	case RegexGeneric:
-		stats.GenericUsage++
-	}
-}
-
-// incrementCacheHit atomically increments cache hit counter
-func (stats *RegexPoolStats) incrementCacheHit() {
-	stats.mutex.Lock()
-	defer stats.mutex.Unlock()
-	stats.CacheHits++
-}
-
-// incrementCacheMiss atomically increments cache miss counter
-func (stats *RegexPoolStats) incrementCacheMiss() {
-	stats.mutex.Lock()
-	defer stats.mutex.Unlock()
-	stats.CacheMisses++
-}
 
 // CacheConfig holds configuration parameters for directory cache
 type CacheConfig struct {
@@ -574,34 +494,14 @@ type cacheEntry struct {
 	lastAccess time.Time
 }
 
-// CacheStats holds statistics about cache performance
-type CacheStats struct {
-	Hits      int64
-	Misses    int64
-	Evictions int64
-	TotalSize int64
-}
-
-// CachePerformance provides cache performance metrics
-func (stats *CacheStats) HitRatio() float64 {
-	total := stats.Hits + stats.Misses
-	if total == 0 {
-		return 0.0
-	}
-	return float64(stats.Hits) / float64(total)
-}
-
 type DirCache struct {
 	cache       map[string]cacheEntry
 	mutex       sync.RWMutex
 	config      *CacheConfig
 	fs          FileSystem
-	stats       CacheStats
 	stopCleanup chan struct{}
 	cleanupOnce sync.Once
 }
-
-var dirCache = NewDirCache(DefaultCacheConfig(), &DefaultFileSystem{})
 
 // Security validation functions
 
@@ -651,9 +551,19 @@ func validateRepositoryURL(repo string) error {
 		return fmt.Errorf("unsupported URL scheme: %s", parsedURL.Scheme)
 	}
 
-	// Validate hostname
-	if parsedURL.Host != "" && !validHostname.MatchString(parsedURL.Host) {
-		return fmt.Errorf("invalid hostname: %s", parsedURL.Host)
+	// Validate hostname (strip port if present)
+	if parsedURL.Host != "" {
+		host := parsedURL.Host
+		if strings.Contains(host, ":") {
+			var err error
+			host, _, err = net.SplitHostPort(host)
+			if err != nil {
+				return fmt.Errorf("invalid host:port: %s", parsedURL.Host)
+			}
+		}
+		if !validHostname.MatchString(host) {
+			return fmt.Errorf("invalid hostname: %s", host)
+		}
 	}
 
 	// Validate path for traversal attacks
@@ -726,24 +636,17 @@ func validatePath(path string) error {
 	return nil
 }
 
-// secureGitClone performs git clone with additional security measures including timeout
-func secureGitClone(repository, targetDir string, quiet, shallow bool) error {
-	// Double-check validation (defense in depth)
+// secureGitClone performs git clone with additional security measures
+func secureGitClone(ctx context.Context, repository, targetDir string, quiet, shallow bool) error {
 	if err := validateRepositoryURL(repository); err != nil {
 		return fmt.Errorf("security validation failed: %w", err)
 	}
 
-	// Validate target directory to prevent directory traversal
 	cleanTargetDir := filepath.Clean(targetDir)
 	if strings.Contains(cleanTargetDir, "..") {
 		return errors.New("target directory contains path traversal")
 	}
 
-	// Create context with timeout to prevent hanging operations
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	// Create command with explicit arguments and timeout context (no shell interpretation)
 	args := []string{"clone"}
 	if shallow {
 		args = append(args, "--depth=1")
@@ -833,7 +736,6 @@ func processRepositories(config *Config) *ProcessingResult {
 	return wp.StartWithSignalHandling()
 }
 
-// processRepositoriesSequential processes repositories sequentially (fallback for single repo/worker)
 func processRepositoriesSequential(config *Config) *ProcessingResult {
 	result := &ProcessingResult{}
 
@@ -841,51 +743,14 @@ func processRepositoriesSequential(config *Config) *ProcessingResult {
 		repository := strings.TrimSpace(arg)
 		result.ProcessedCount++
 
-		// Security: Validate repository URL before processing
-		if err := validateRepositoryURL(repository); err != nil {
-			prnt("invalid repository URL '%s': %s", repository, err)
-			result.FailedCount++
-			continue
-		}
-
-		projectDir, err := getProjectDir(repository, config.Dependencies.Env)
+		projectDir, err := processOneRepository(config, repository)
 		if err != nil {
-			prnt("failed to determine project directory for '%s': %s", repository, err)
+			prntf("%s", err)
 			result.FailedCount++
 			continue
 		}
 
-		// Check if directory already exists and is not empty
-		if ok := config.Dependencies.DirCheck.IsNotEmpty(projectDir); ok {
-			if !config.Quiet {
-				prnt("repository already exists: %s", projectDir)
-			}
-			// Still consider this successful for output purposes
-			result.LastSuccessfulProjectDir = projectDir
-			continue
-		}
-
-		// Create parent directory
-		if err := config.Dependencies.FS.MkdirAll(filepath.Dir(projectDir), 0750); err != nil {
-			prnt("failed create directory: %s", err)
-			result.FailedCount++
-			continue
-		}
-
-		// Security: Use secure git clone with validated arguments
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		if err := config.Dependencies.GitClone.Clone(ctx, repository, filepath.Dir(projectDir), config.Quiet, config.ShallowClone); err != nil {
-			prnt("failed clone repository '%s': %s", repository, err)
-			result.FailedCount++
-			continue
-		}
-
-		// Clone was successful
 		result.LastSuccessfulProjectDir = projectDir
-		if !config.Quiet {
-			fmt.Fprintln(os.Stderr)
-		}
 	}
 
 	return result
@@ -896,7 +761,7 @@ func printSummary(config *Config, result *ProcessingResult) {
 	// Print summary if multiple repositories were processed
 	if result.ProcessedCount > 1 && !config.Quiet {
 		successCount := result.ProcessedCount - result.FailedCount
-		prnt("processed %d repositories: %d successful, %d failed",
+		prntf("processed %d repositories: %d successful, %d failed",
 			result.ProcessedCount, successCount, result.FailedCount)
 	}
 
@@ -904,7 +769,7 @@ func printSummary(config *Config, result *ProcessingResult) {
 	if result.LastSuccessfulProjectDir != "" {
 		abs, err := filepath.Abs(result.LastSuccessfulProjectDir)
 		if err != nil {
-			prnt("failed to get absolute path for %s: %s", result.LastSuccessfulProjectDir, err)
+			prntf("failed to get absolute path for %s: %s", result.LastSuccessfulProjectDir, err)
 			fmt.Println(result.LastSuccessfulProjectDir) // fallback to relative path
 		} else {
 			fmt.Println(abs)
@@ -912,7 +777,7 @@ func printSummary(config *Config, result *ProcessingResult) {
 	} else {
 		// No successful repositories processed
 		if !config.Quiet {
-			prnt("no repositories were successfully processed")
+			prntf("no repositories were successfully processed")
 		}
 		os.Exit(1)
 	}
@@ -922,7 +787,7 @@ func main() {
 	// Parse command line arguments
 	config, err := parseArgs()
 	if err != nil {
-		prnt("error: %s", err)
+		prntf("error: %s", err)
 		usage()
 		os.Exit(1)
 	}
@@ -945,7 +810,7 @@ func main() {
 
 	// Validate dependencies
 	if err := validateDependencies(config.Dependencies); err != nil {
-		prnt("error: %s", err)
+		prntf("error: %s", err)
 		os.Exit(1)
 	}
 
@@ -1015,50 +880,33 @@ func detectRegexType(repo string) RegexType {
 	return RegexGeneric
 }
 
-// getRegexFromPool gets the appropriate regex from pool based on URL type
-func getRegexFromPool(regexType RegexType) (*regexp.Regexp, func(*regexp.Regexp)) {
+func regexForType(regexType RegexType) *regexp.Regexp {
 	switch regexType {
 	case RegexHTTPS:
-		r := httpsRegexPool.Get().(*regexp.Regexp)
-		return r, func(regex *regexp.Regexp) { httpsRegexPool.Put(regex) }
+		return httpsRegex
 	case RegexSSH:
-		r := sshRegexPool.Get().(*regexp.Regexp)
-		return r, func(regex *regexp.Regexp) { sshRegexPool.Put(regex) }
+		return sshRegex
 	case RegexGit:
-		r := gitRegexPool.Get().(*regexp.Regexp)
-		return r, func(regex *regexp.Regexp) { gitRegexPool.Put(regex) }
+		return gitRegex
 	default:
-		r := genericRegexPool.Get().(*regexp.Regexp)
-		return r, func(regex *regexp.Regexp) { genericRegexPool.Put(regex) }
+		return genericRegex
 	}
 }
 
-// normalize normalizes the given repository string and returns the parsed repository URL.
-// Enhanced with security validation, specialized regex patterns, and caching.
-// Returns error instead of empty string for better error handling.
 func normalize(repo string) (string, error) {
 	if repo == "" {
 		return "", errors.New("repository URL is empty")
 	}
 
-	// Check cache first
 	if cached, exists := urlCache.Get(repo); exists {
-		regexStats.incrementCacheHit()
 		return cached, nil
 	}
-	regexStats.incrementCacheMiss()
 
-	// Detect the best regex pattern for this URL
 	regexType := detectRegexType(repo)
-	regexStats.incrementUsage(regexType)
-
-	// Get appropriate regex from pool
-	r, putBack := getRegexFromPool(regexType)
-	defer putBack(r)
+	r := regexForType(regexType)
 
 	var host, path string
 
-	// Handle different URL patterns
 	switch regexType {
 	case RegexHTTPS, RegexGit:
 		match := r.FindStringSubmatch(repo)
@@ -1172,67 +1020,6 @@ func sanitizePathWithError(path string) (string, error) {
 	return path, nil
 }
 
-// sanitizePath cleans and validates repository paths against security threats
-func sanitizePath(path string) string {
-	if path == "" {
-		return ""
-	}
-
-	// Remove dangerous prefixes and suffixes with optimized string operations
-	// Use string slicing to avoid multiple allocations
-	for {
-		originalLen := len(path)
-
-		// Remove leading slashes and tildes
-		if len(path) > 0 && (path[0] == '/' || path[0] == '~') {
-			path = path[1:]
-			continue
-		}
-
-		// Remove trailing slashes
-		if len(path) > 0 && path[len(path)-1] == '/' {
-			path = path[:len(path)-1]
-			continue
-		}
-
-		// Remove .git suffix
-		if len(path) >= 4 && path[len(path)-4:] == ".git" {
-			path = path[:len(path)-4]
-			continue
-		}
-
-		// If no changes were made, break
-		if len(path) == originalLen {
-			break
-		}
-	}
-
-	// Security: Check for path traversal attempts
-	if strings.Contains(path, "..") {
-		return ""
-	}
-
-	// Security: Remove consecutive slashes
-	for strings.Contains(path, "//") {
-		path = strings.ReplaceAll(path, "//", "/")
-	}
-
-	// Security: Validate path contains only safe characters
-	if path != "" && !validRepoPath.MatchString(path) {
-		return ""
-	}
-
-	// Security: Ensure path doesn't start with dangerous patterns
-	if len(path) >= 2 {
-		firstChar := path[0]
-		if (firstChar == '.' || firstChar == '-' || firstChar == '_') && path[1] == '/' {
-			return ""
-		}
-	}
-
-	return path
-}
-
 // getProjectDir returns the project directory based on the given repository URL.
 // It retrieves the GIT_PROJECT_DIR environment variable and normalizes it.
 // If the GIT_PROJECT_DIR starts with "~", it replaces it with the user's home directory.
@@ -1340,19 +1127,6 @@ func (dc *DirCache) cleanup() {
 			evictionCount++
 		}
 	}
-
-	dc.stats.Evictions += int64(evictionCount)
-	dc.stats.TotalSize = int64(len(dc.cache))
-}
-
-// GetStats returns current cache statistics
-func (dc *DirCache) GetStats() CacheStats {
-	dc.mutex.RLock()
-	defer dc.mutex.RUnlock()
-
-	stats := dc.stats
-	stats.TotalSize = int64(len(dc.cache))
-	return stats
 }
 
 // Clear removes all entries from the cache
@@ -1361,7 +1135,6 @@ func (dc *DirCache) Clear() {
 	defer dc.mutex.Unlock()
 
 	dc.cache = make(map[string]cacheEntry)
-	dc.stats = CacheStats{}
 }
 
 // IsDirectoryNotEmpty checks if the specified directory is not empty with caching.
@@ -1379,7 +1152,6 @@ func (dc *DirCache) IsDirectoryNotEmpty(name string) bool {
 			if entry, ok := dc.cache[name]; ok && now.Sub(entry.timestamp) < dc.config.TTL {
 				entry.lastAccess = now
 				dc.cache[name] = entry
-				dc.stats.Hits++
 				dc.mutex.Unlock()
 				return entry.exists
 			}
@@ -1402,8 +1174,6 @@ func (dc *DirCache) IsDirectoryNotEmpty(name string) bool {
 		timestamp:  now,
 		lastAccess: now,
 	}
-	dc.stats.Misses++
-
 	// Check if cache size exceeds limit and evict LRU entries if needed
 	if dc.config.MaxEntries > 0 && len(dc.cache) > dc.config.MaxEntries {
 		dc.evictLRU()
@@ -1443,13 +1213,7 @@ func (dc *DirCache) evictLRU() {
 	// Remove oldest entries
 	for i := 0; i < toEvict && i < len(entries); i++ {
 		delete(dc.cache, entries[i].key)
-		dc.stats.Evictions++
 	}
-}
-
-// isDirectoryNotEmpty is a wrapper that uses the global cache.
-func isDirectoryNotEmpty(name string) bool {
-	return dirCache.IsDirectoryNotEmpty(name)
 }
 
 // Usage prints the usage of the program.
@@ -1474,7 +1238,7 @@ func usage() {
 	fmt.Println("  gclone -w 8 https://github.com/user/repo1 https://github.com/user/repo2")
 }
 
-func prnt(format string, args ...any) {
+func prntf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format, args...)
 	fmt.Fprintln(os.Stderr)
 }
