@@ -251,7 +251,7 @@ func (wp *WorkerPool) worker(workerID int) {
 
 // processOneRepository validates, resolves, and clones a single repository.
 // Returns the project directory and an error if any step fails.
-func processOneRepository(config *Config, repository string) (string, error) {
+func processOneRepository(parentCtx context.Context, config *Config, repository string) (string, error) {
 	if err := validateRepositoryURL(repository); err != nil {
 		return "", fmt.Errorf("invalid repository URL '%s': %w", repository, err)
 	}
@@ -272,7 +272,7 @@ func processOneRepository(config *Config, repository string) (string, error) {
 		return "", fmt.Errorf("failed create directory: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 	defer cancel()
 
 	if err := config.Dependencies.GitClone.Clone(ctx, repository, filepath.Dir(projectDir), config.Quiet, config.ShallowClone); err != nil {
@@ -289,7 +289,17 @@ func processOneRepository(config *Config, repository string) (string, error) {
 func (wp *WorkerPool) processJob(job RepositoryJob, _ int) {
 	result := WorkerResult{Job: job}
 
-	projectDir, err := processOneRepository(wp.config, job.Repository)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-wp.shutdown:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	projectDir, err := processOneRepository(ctx, wp.config, job.Repository)
+	cancel()
 	if err != nil {
 		result.Error = err
 		wp.results <- result
@@ -743,7 +753,7 @@ func processRepositoriesSequential(config *Config) *ProcessingResult {
 		repository := strings.TrimSpace(arg)
 		result.ProcessedCount++
 
-		projectDir, err := processOneRepository(config, repository)
+		projectDir, err := processOneRepository(context.Background(), config, repository)
 		if err != nil {
 			prntf("%s", err)
 			result.FailedCount++
