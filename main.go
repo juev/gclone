@@ -182,6 +182,7 @@ type Config struct {
 	ShowVersionInfo bool
 	Quiet           bool
 	ShallowClone    bool
+	FullHost        bool
 	Workers         int
 	RepositoryArgs  []string
 	Dependencies    *Dependencies
@@ -256,7 +257,7 @@ func processOneRepository(parentCtx context.Context, config *Config, repository 
 		return "", fmt.Errorf("invalid repository URL '%s': %w", repository, err)
 	}
 
-	projectDir, err := getProjectDir(repository, config.Dependencies.Env)
+	projectDir, err := getProjectDir(repository, config.Dependencies.Env, normalizeOptions{FullHost: config.FullHost})
 	if err != nil {
 		return "", fmt.Errorf("failed to determine project directory for '%s': %w", repository, err)
 	}
@@ -697,6 +698,7 @@ func parseArgs() (*Config, error) {
 	pflag.BoolVarP(&config.ShowVersionInfo, "version", "v", false, "Show the version number and exit")
 	pflag.BoolVarP(&config.Quiet, "quiet", "q", false, "Suppress output")
 	pflag.BoolVarP(&config.ShallowClone, "shallow", "s", false, "Perform shallow clone with --depth=1")
+	pflag.BoolVar(&config.FullHost, "full-host", false, "Keep a leading ssh. hostname label in the project path")
 	pflag.IntVarP(&config.Workers, "workers", "w", getDefaultWorkers(), "Number of parallel workers for cloning")
 	pflag.Parse()
 
@@ -903,12 +905,46 @@ func regexForType(regexType RegexType) *regexp.Regexp {
 	}
 }
 
-func normalize(repo string) (string, error) {
+// normalizeOptions controls how the host of a repository URL becomes part of the project path.
+type normalizeOptions struct {
+	// FullHost keeps a leading ssh. label, so an SSH endpoint such as ssh.bitbucket.org keeps a
+	// directory of its own instead of sharing the one of the host it is an endpoint for.
+	FullHost bool
+}
+
+// sshEndpointLabel is the leading hostname label forges use for their SSH endpoint.
+const sshEndpointLabel = "ssh"
+
+// projectHost is the host as it appears in the project path: lowercased, and without the leading
+// label when that label only marks the SSH endpoint of the same service (ssh.bitbucket.org).
+// It is called with an already validated hostname and returns an already validated one.
+func projectHost(host string, fullHost bool) string {
+	host = strings.ToLower(host)
+
+	if fullHost {
+		return host
+	}
+
+	rest, found := strings.CutPrefix(host, sshEndpointLabel+".")
+	if !found || !strings.Contains(rest, ".") || !validHostname.MatchString(rest) {
+		return host
+	}
+
+	return rest
+}
+
+func normalize(repo string, opts normalizeOptions) (string, error) {
 	if repo == "" {
 		return "", errors.New("repository URL is empty")
 	}
 
-	if cached, exists := urlCache.Get(repo); exists {
+	// The cache is keyed per mode: one URL maps to a different path depending on FullHost.
+	cacheKey := repo
+	if opts.FullHost {
+		cacheKey = "full-host:" + repo
+	}
+
+	if cached, exists := urlCache.Get(cacheKey); exists {
 		return cached, nil
 	}
 
@@ -947,6 +983,8 @@ func normalize(repo string) (string, error) {
 		return "", fmt.Errorf("invalid hostname: %s", host)
 	}
 
+	host = projectHost(host, opts.FullHost)
+
 	// Security: Sanitize path to prevent traversal attacks
 	sanitizedPath, err := sanitizePathWithError(path)
 	if err != nil {
@@ -961,7 +999,7 @@ func normalize(repo string) (string, error) {
 	result := filepath.Join(host, sanitizedPath)
 
 	// Cache the result
-	urlCache.Set(repo, result)
+	urlCache.Set(cacheKey, result)
 
 	return result, nil
 }
@@ -1035,7 +1073,7 @@ func sanitizePathWithError(path string) (string, error) {
 // If the GIT_PROJECT_DIR starts with "~", it replaces it with the user's home directory.
 // The normalized repository URL is then joined with the GIT_PROJECT_DIR to form the project directory path.
 // Returns error for better error handling instead of empty string.
-func getProjectDir(repository string, env Environment) (string, error) {
+func getProjectDir(repository string, env Environment, opts normalizeOptions) (string, error) {
 	gitProjectDir := env.Getenv("GIT_PROJECT_DIR")
 
 	if len(gitProjectDir) > 0 && gitProjectDir[0] == '~' {
@@ -1046,7 +1084,7 @@ func getProjectDir(repository string, env Environment) (string, error) {
 		gitProjectDir = filepath.Join(homeDir, gitProjectDir[1:])
 	}
 
-	normalizedRepo, err := normalize(repository)
+	normalizedRepo, err := normalize(repository, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to normalize repository URL: %w", err)
 	}
@@ -1226,7 +1264,7 @@ func (dc *DirCache) evictLRU() {
 
 // Usage prints the usage of the program.
 func usage() {
-	fmt.Println("usage: gclone [-h] [-v] [-q] [-s] [-w WORKERS] [REPOSITORY]")
+	fmt.Println("usage: gclone [-h] [-v] [-q] [-s] [--full-host] [-w WORKERS] [REPOSITORY]")
 	fmt.Println()
 	fmt.Println("positional arguments:")
 	fmt.Println("  REPOSITORY         Repository URL")
@@ -1236,6 +1274,7 @@ func usage() {
 	fmt.Println("  -v, --version      Show the version number and exit")
 	fmt.Println("  -q, --quiet        Suppress output")
 	fmt.Println("  -s, --shallow      Perform shallow clone with --depth=1")
+	fmt.Println("      --full-host    Keep a leading ssh. hostname label in the project path")
 	fmt.Printf("  -w, --workers      Number of parallel workers (default: %d)\n", getDefaultWorkers())
 	fmt.Println()
 	fmt.Println("environment variables:")
@@ -1244,6 +1283,7 @@ func usage() {
 	fmt.Println("examples:")
 	fmt.Println("  GIT_PROJECT_DIR=\"$HOME/src\" gclone https://github.com/user/repo")
 	fmt.Println("  gclone -w 8 https://github.com/user/repo1 https://github.com/user/repo2")
+	fmt.Println("  gclone git@ssh.bitbucket.org:team/service.git   # $GIT_PROJECT_DIR/bitbucket.org/team/service")
 }
 
 func prntf(format string, args ...any) {
