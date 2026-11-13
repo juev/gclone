@@ -59,7 +59,20 @@ gclone https://github.com/golang/go.git \
 
 # Fast shallow clone
 gclone --shallow https://github.com/large/repository.git
+
+# SSH and scp-like forms work the same way
+gclone git@ssh.bitbucket.org:team/service.git
+# Result: ~/src/bitbucket.org/team/service/
 ```
+
+The host of the URL becomes the first directory. It is lowercased, and a leading `ssh` label is
+dropped, because that label marks a forge's SSH endpoint and not a different service:
+`git@ssh.bitbucket.org:team/service.git`, `ssh://git@ssh.bitbucket.org:443/team/service.git` and
+`git@bitbucket.org:team/service.git` all clone into `$GIT_PROJECT_DIR/bitbucket.org/team/service`.
+The same holds for `ssh.github.com`, GitHub's SSH endpoint on port 443. Every other host keeps its
+name as written: `git@git.example.com:team/service.git` still clones into
+`$GIT_PROJECT_DIR/git.example.com/team/service`. Pass `--full-host` to keep the `ssh` label, for
+the rare host where `ssh.<domain>` serves a different repository than `<domain>`.
 
 ### Advanced Usage
 
@@ -81,13 +94,14 @@ code "$(gclone --quiet https://github.com/user/repo.git)"
 ## 💡 Command Line Options
 
 ```bash
-gclone [-h] [-v] [-q] [-s] [-w WORKERS] [REPOSITORY...]
+gclone [-h] [-v] [-q] [-s] [--full-host] [-w WORKERS] [REPOSITORY...]
 
 Options:
   -h, --help         Show this help message and exit
   -v, --version      Show the version number and exit
   -q, --quiet        Suppress output
   -s, --shallow      Perform shallow clone with --depth=1
+      --full-host    Keep a leading ssh. hostname label in the project path
   -w, --workers      Number of parallel workers (default: 4, max: 32)
 
 Environment Variables:

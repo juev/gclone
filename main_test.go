@@ -13,6 +13,14 @@ import (
 	"time"
 )
 
+// Repository URLs and the project paths they map to, shared by the host-handling tests.
+const (
+	sshBitbucketRepo = "git@ssh.bitbucket.org:team/service.git"
+	sshBitbucketPort = "ssh://git@ssh.bitbucket.org:443/team/service.git"
+	bitbucketPath    = "bitbucket.org/team/service"
+	sshBitbucketPath = "ssh.bitbucket.org/team/service"
+)
+
 func Test_getProjectDir(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -84,6 +92,20 @@ func Test_getProjectDir(t *testing.T) {
 			gitProjectDir: "src",
 			want:          "src/zod.bitterling-ghost.ts.net/juev/test",
 		},
+		{
+			name:          "ssh endpoint",
+			repository:    sshBitbucketRepo,
+			homeVar:       "/home/test",
+			gitProjectDir: "src",
+			want:          "src/" + bitbucketPath,
+		},
+		{
+			name:          "ssh endpoint with port",
+			repository:    sshBitbucketPort,
+			homeVar:       "/home/test",
+			gitProjectDir: "src",
+			want:          "src/" + bitbucketPath,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,7 +113,7 @@ func Test_getProjectDir(t *testing.T) {
 			t.Setenv("GIT_PROJECT_DIR", tt.gitProjectDir)
 
 			env := &DefaultEnvironment{}
-			got, err := getProjectDir(tt.repository, env)
+			got, err := getProjectDir(tt.repository, env, normalizeOptions{})
 			if err != nil {
 				t.Errorf("getProjectDir() unexpected error = %v", err)
 				return
@@ -161,10 +183,45 @@ func Test_normalize(t *testing.T) {
 			},
 			wantRepo: "git.sr.ht/libreboot/lbmk",
 		},
+		{
+			name: "ssh endpoint",
+			args: args{
+				repository: sshBitbucketRepo,
+			},
+			wantRepo: bitbucketPath,
+		},
+		{
+			name: "ssh endpoint with port",
+			args: args{
+				repository: sshBitbucketPort,
+			},
+			wantRepo: bitbucketPath,
+		},
+		{
+			name: "uppercase host",
+			args: args{
+				repository: "git@SSH.BitBucket.ORG:team/service.git",
+			},
+			wantRepo: bitbucketPath,
+		},
+		{
+			name: "ssh argument",
+			args: args{
+				repository: "ssh://git@ssh.github.com:443/juev/gclone.git",
+			},
+			wantRepo: "github.com/juev/gclone",
+		},
+		{
+			name: "ssh endpoint over https",
+			args: args{
+				repository: "https://ssh.bitbucket.org/team/service.git",
+			},
+			wantRepo: bitbucketPath,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotRepo, err := normalize(tt.args.repository)
+			gotRepo, err := normalize(tt.args.repository, normalizeOptions{})
 			if err != nil {
 				t.Errorf("normalize() unexpected error = %v", err)
 				return
@@ -176,12 +233,96 @@ func Test_normalize(t *testing.T) {
 	}
 }
 
+// Hosts used by Test_projectHost.
+const (
+	sshBitbucketHost = "ssh.bitbucket.org"
+	gitExampleHost   = "git.example.com"
+	bareSSHHost      = "ssh"
+)
+
+// projectHost cases the whole rule: lowercase always, and drop the leading label only when it
+// marks an SSH endpoint of the same service.
+func Test_projectHost(t *testing.T) {
+	tests := []struct {
+		host     string
+		fullHost bool
+		want     string
+	}{
+		{host: sshBitbucketHost, want: "bitbucket.org"},
+		{host: "SSH.BitBucket.ORG", want: "bitbucket.org"},
+		{host: "ssh.github.com", want: "github.com"},
+		{host: sshBitbucketHost, fullHost: true, want: sshBitbucketHost},
+		{host: gitExampleHost, want: gitExampleHost},
+		{host: "git.sr.ht", want: "git.sr.ht"},
+		{host: "ssh.git.example.com", want: gitExampleHost},
+		{host: "altssh.gitlab.com", want: "altssh.gitlab.com"},
+		{host: "ssh.local", want: "ssh.local"},
+		{host: bareSSHHost, want: bareSSHHost},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := projectHost(tt.host, tt.fullHost); got != tt.want {
+				t.Errorf("projectHost(%q, %v) = %v, want %v", tt.host, tt.fullHost, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_normalizeFullHost(t *testing.T) {
+	tests := []struct {
+		repository string
+		wantRepo   string
+	}{
+		{sshBitbucketRepo, sshBitbucketPath},
+		{sshBitbucketPort, sshBitbucketPath},
+		{"ssh://git@ssh.github.com:443/juev/gclone.git", "ssh.github.com/juev/gclone"},
+		// The host is lowercased in both modes: a hostname is case-insensitive.
+		{"git@SSH.BitBucket.ORG:team/service.git", sshBitbucketPath},
+		{"git@github.com:juev/gclone.git", "github.com/juev/gclone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.repository, func(t *testing.T) {
+			gotRepo, err := normalize(tt.repository, normalizeOptions{FullHost: true})
+			if err != nil {
+				t.Fatalf("normalize() unexpected error = %v", err)
+			}
+			if gotRepo != tt.wantRepo {
+				t.Errorf("normalize() gotRepo = %v, want %v", gotRepo, tt.wantRepo)
+			}
+		})
+	}
+}
+
+// The cache is keyed per mode, so a URL normalized in one mode must not be served in the other.
+func Test_normalizeCacheSeparatesHostMode(t *testing.T) {
+	urlCache.Clear()
+
+	repository := sshBitbucketRepo
+
+	trimmed, err := normalize(repository, normalizeOptions{})
+	if err != nil {
+		t.Fatalf("normalize() unexpected error = %v", err)
+	}
+
+	full, err := normalize(repository, normalizeOptions{FullHost: true})
+	if err != nil {
+		t.Fatalf("normalize() unexpected error = %v", err)
+	}
+
+	if trimmed != bitbucketPath {
+		t.Errorf("normalize() = %v, want %v", trimmed, bitbucketPath)
+	}
+	if full != sshBitbucketPath {
+		t.Errorf("normalize(full host) = %v, want %v", full, sshBitbucketPath)
+	}
+}
+
 // Benchmark functions
 func BenchmarkNormalize(b *testing.B) {
 	repository := "https://github.com/user/repo"
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = normalize(repository)
+		_, _ = normalize(repository, normalizeOptions{})
 	}
 }
 
@@ -271,7 +412,7 @@ func BenchmarkNormalizeHTTPS(b *testing.B) {
 	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = normalize(repository)
+		_, _ = normalize(repository, normalizeOptions{})
 	}
 }
 
@@ -282,7 +423,7 @@ func BenchmarkNormalizeSSH(b *testing.B) {
 	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = normalize(repository)
+		_, _ = normalize(repository, normalizeOptions{})
 	}
 }
 
@@ -293,7 +434,7 @@ func BenchmarkNormalizeGit(b *testing.B) {
 	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = normalize(repository)
+		_, _ = normalize(repository, normalizeOptions{})
 	}
 }
 
@@ -301,10 +442,10 @@ func BenchmarkNormalizeGit(b *testing.B) {
 func BenchmarkNormalizeCached(b *testing.B) {
 	repository := "https://github.com/user/repo.git"
 	// Warm up cache
-	_, _ = normalize(repository)
+	_, _ = normalize(repository, normalizeOptions{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = normalize(repository)
+		_, _ = normalize(repository, normalizeOptions{})
 	}
 }
 
@@ -321,7 +462,7 @@ func BenchmarkNormalizeMixed(b *testing.B) {
 	urlCache.Clear()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = normalize(repositories[i%len(repositories)])
+		_, _ = normalize(repositories[i%len(repositories)], normalizeOptions{})
 	}
 }
 
@@ -478,7 +619,7 @@ func TestNormalizeSecurity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := normalize(tt.input)
+			result, err := normalize(tt.input, normalizeOptions{})
 			if tt.expected == "" {
 				// Expecting failure
 				if err == nil {
@@ -641,7 +782,7 @@ func TestGetProjectDirSecurity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Setenv("GIT_PROJECT_DIR", tt.gitProjectDir)
 			env := &DefaultEnvironment{}
-			result, err := getProjectDir(tt.repository, env)
+			result, err := getProjectDir(tt.repository, env, normalizeOptions{})
 			if tt.expectedResult == "" {
 				// Expecting failure
 				if err == nil {
@@ -1043,8 +1184,8 @@ func TestGracefulShutdownCollectsInFlightResults(t *testing.T) {
 	}
 
 	config := &Config{
-		Workers: 2,
-		Quiet:   true,
+		Workers:        2,
+		Quiet:          true,
 		RepositoryArgs: repos,
 		Dependencies: &Dependencies{
 			FS:       mockFS,
