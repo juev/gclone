@@ -16,15 +16,13 @@ jobs:
       - 
         uses: kevincobain2000/action-gobrew@v2
         with:
-          version: latest
+          # Pin Go: the linter is pinned too, and a floating toolchain emits export data its
+          # release binary cannot read.
+          version: 1.27.0
       -
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.13.0
-          # Build the linter with the same Go the workflow installs: a prebuilt binary cannot read
-          # the export data of a newer standard library ("export data version 5 is greater than
-          # maximum supported version 4").
-          install-mode: goinstall
       - 
         run: go test ./...
         shell: bash
