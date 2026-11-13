@@ -16,6 +16,10 @@ linters:
     - revive
     - staticcheck
     - whitespace
+  settings:
+    goconst:
+      # Test tables repeat fixture strings on purpose; the linter is for production code.
+      ignore-tests: true
   exclusions:
     generated: lax
     presets:
