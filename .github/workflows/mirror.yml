@@ -1,0 +1,40 @@
+name: Mirror to Forgejo
+
+# Keeps the copy on git.evsyukov.org in step with GitHub. Pushes are plain
+# (no force): if the copies ever diverge, the run fails instead of
+# overwriting the other side.
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forgejo-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push main and tags to Forgejo
+        env:
+          SSH_KEY: ${{ secrets.FORGEJO_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FORGEJO_KNOWN_HOSTS }}
+          REMOTE: ssh://git@git.evsyukov.org:443/juev/gclone.git
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/forgejo
+          chmod 600 ~/.ssh/forgejo
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/forgejo -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          git push "$REMOTE" refs/remotes/origin/main:refs/heads/main
+          git push "$REMOTE" --tags
